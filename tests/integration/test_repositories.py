@@ -76,6 +76,7 @@ async def test_statement(
         user_id=test_user.id,
         card_id=test_card.id,
         statement_month=date(2026, 1, 1),
+        statement_period=date(2026, 1, 1),
         closing_balance=50000,  # Rs. 500.00
         reward_points=250,
     )
@@ -251,6 +252,7 @@ class TestStatementRepository:
             user_id=test_user.id,
             card_id=test_card.id,
             statement_month=date(2026, 2, 1),
+            statement_period=date(2026, 2, 1),
             closing_balance=75000,
             reward_points=375,
         )

@@ -1,6 +1,6 @@
 """Unit tests for StatementService."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import UUID, uuid4
@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     BankDetectionError,
-    DuplicateStatementError,
     MaskingError,
     PDFExtractionError,
     ParsingError,
@@ -29,7 +28,15 @@ def mock_db():
     """Create a mock database session."""
     db = AsyncMock(spec=AsyncSession)
     db.add = Mock()
+    db.delete = AsyncMock()
     db.flush = AsyncMock()
+    # Default DB execute() result used for override lookup during masking.
+    # SQLAlchemy's Result.scalars().all() is synchronous; mimic that shape.
+    execute_result = MagicMock()
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+    execute_result.scalars.return_value = scalars_result
+    db.execute = AsyncMock(return_value=execute_result)
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
     return db
@@ -77,7 +84,7 @@ def sample_parsed_statement():
 @pytest.fixture
 def mock_parser_factory():
     """Create a mock parser factory."""
-    with patch('app.services.statement.ParserFactory') as mock:
+    with patch("app.services.statement.get_parser_factory") as mock:
         yield mock
 
 
@@ -116,11 +123,11 @@ class TestStatementService:
         factory_instance.parse.return_value = sample_parsed_statement
         
         pipeline_instance = mock_masking_pipeline.return_value
-        pipeline_instance.mask_dict.side_effect = lambda d, fields: {
+        pipeline_instance.mask_dict.side_effect = lambda d, fields_to_mask=None: {
             **d,
             "description": f"MASKED_{d['description']}"
         }
-        pipeline_instance.validate_no_leaks.return_value = True
+        pipeline_instance.validate_no_leaks.return_value = (True, [])
         
         # Mock repositories
         service = StatementService(mock_db)
@@ -303,7 +310,7 @@ class TestStatementService:
         assert exc_info.value.error_code == "PARSE_005"
 
     @pytest.mark.asyncio
-    async def test_process_upload_duplicate_statement(
+    async def test_process_upload_duplicate_statement_upserts(
         self,
         mock_db,
         test_user,
@@ -311,13 +318,13 @@ class TestStatementService:
         mock_parser_factory,
         mock_masking_pipeline
     ):
-        """Test handling of duplicate statement upload."""
+        """Test idempotent upload updates in place and returns same statement_id."""
         factory_instance = mock_parser_factory.return_value
         factory_instance.parse.return_value = sample_parsed_statement
         
         pipeline_instance = mock_masking_pipeline.return_value
-        pipeline_instance.mask_dict.side_effect = lambda d, fields: d
-        pipeline_instance.validate_no_leaks.return_value = True
+        pipeline_instance.mask_dict.side_effect = lambda d, fields_to_mask=None: d
+        pipeline_instance.validate_no_leaks.return_value = (True, [])
         
         service = StatementService(mock_db)
         
@@ -331,15 +338,86 @@ class TestStatementService:
         service.card_repo.get_by_last_four_and_bank = AsyncMock(return_value=test_card)
         
         # Mock existing statement
-        service.statement_repo.get_by_card_and_month = AsyncMock(return_value=Mock(id=uuid4()))
+        existing_statement_id = uuid4()
+        existing_statement = Statement(
+            user_id=test_user.id,
+            card_id=test_card.id,
+            statement_month=sample_parsed_statement.statement_month,
+            closing_balance=123,  # will be updated
+            reward_points=1,
+            reward_points_earned=2,
+        )
+        existing_statement.id = existing_statement_id
+        existing_statement.deleted_at = None
+        service.statement_repo.get_by_card_and_month = AsyncMock(return_value=existing_statement)
         
         pdf_bytes = b"pdf content"
-        
-        with pytest.raises(DuplicateStatementError) as exc_info:
-            await service.process_upload(pdf_bytes, test_user)
-        
-        assert exc_info.value.error_code == "PARSE_006"
-        mock_db.rollback.assert_called_once()
+        result = await service.process_upload(pdf_bytes, test_user)
+
+        assert result.statement_id == existing_statement_id
+        assert result.card_id == test_card.id
+        assert result.transactions_count == len(sample_parsed_statement.transactions)
+        mock_db.commit.assert_called_once()
+
+        # Statement fields updated and undeleted.
+        assert existing_statement.deleted_at is None
+        assert existing_statement.closing_balance == sample_parsed_statement.closing_balance_cents
+        assert existing_statement.reward_points == sample_parsed_statement.reward_points
+        assert existing_statement.reward_points_earned == sample_parsed_statement.reward_points_earned
+
+    @pytest.mark.asyncio
+    async def test_process_upload_soft_deleted_existing_statement_creates_new(
+        self,
+        mock_db,
+        test_user,
+        sample_parsed_statement,
+        mock_parser_factory,
+        mock_masking_pipeline,
+    ):
+        """If a legacy soft-deleted statement exists, uploading should create a new statement."""
+        factory_instance = mock_parser_factory.return_value
+        factory_instance.parse.return_value = sample_parsed_statement
+
+        pipeline_instance = mock_masking_pipeline.return_value
+        pipeline_instance.mask_dict.side_effect = lambda d, fields_to_mask=None: d
+        pipeline_instance.validate_no_leaks.return_value = (True, [])
+
+        service = StatementService(mock_db)
+
+        test_card = Card(
+            id=uuid4(),
+            user_id=test_user.id,
+            last_four="1234",
+            bank_code="hdfc",
+        )
+        service.card_repo.get_by_last_four_and_bank = AsyncMock(return_value=test_card)
+
+        legacy = Statement(
+            user_id=test_user.id,
+            card_id=test_card.id,
+            statement_month=sample_parsed_statement.statement_month,
+            closing_balance=123,
+            reward_points=1,
+            reward_points_earned=2,
+        )
+        legacy.id = uuid4()
+        legacy.deleted_at = datetime.now()
+        service.statement_repo.get_by_card_and_month = AsyncMock(return_value=legacy)
+
+        # Assign IDs when new Statement/Transaction objects are added.
+        new_statement_id = uuid4()
+
+        def mock_add(obj):
+            if isinstance(obj, Statement) and obj.id is None:
+                obj.id = new_statement_id
+
+        mock_db.add.side_effect = mock_add
+
+        pdf_bytes = b"pdf content"
+        result = await service.process_upload(pdf_bytes, test_user)
+
+        assert result.statement_id != legacy.id
+        mock_db.execute.assert_called()
 
     @pytest.mark.asyncio
     async def test_process_upload_masking_failure(
@@ -379,8 +457,8 @@ class TestStatementService:
         factory_instance.parse.return_value = sample_parsed_statement
         
         pipeline_instance = mock_masking_pipeline.return_value
-        pipeline_instance.mask_dict.side_effect = lambda d, fields: d
-        pipeline_instance.validate_no_leaks.return_value = False  # PII detected
+        pipeline_instance.mask_dict.side_effect = lambda d, fields_to_mask=None: d
+        pipeline_instance.validate_no_leaks.return_value = (False, ["EMAIL_ADDRESS"])  # PII detected
         
         service = StatementService(mock_db)
         pdf_bytes = b"pdf content"
@@ -404,8 +482,8 @@ class TestStatementService:
         factory_instance.parse.return_value = sample_parsed_statement
         
         pipeline_instance = mock_masking_pipeline.return_value
-        pipeline_instance.mask_dict.side_effect = lambda d, fields: d
-        pipeline_instance.validate_no_leaks.return_value = True
+        pipeline_instance.mask_dict.side_effect = lambda d, fields_to_mask=None: d
+        pipeline_instance.validate_no_leaks.return_value = (True, [])
         
         service = StatementService(mock_db)
         
@@ -456,4 +534,4 @@ class TestStatementService:
                 )]
             )
         
-        assert "4-5 digits" in str(exc_info.value)
+        assert "4-5 characters" in str(exc_info.value)

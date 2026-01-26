@@ -19,6 +19,18 @@ class StatementUploadRequest(BaseModel):
     password: str | None = Field(None, description="Password for encrypted PDFs")
 
 
+# Shared schemas
+
+
+class MoneyMeta(BaseModel):
+    """Metadata describing how monetary amounts are represented."""
+
+    currency: str = Field(description="ISO currency code (e.g., INR)")
+    minor_unit: int = Field(
+        description="Number of decimal places for the currency (e.g., 2 for paise/cents)"
+    )
+
+
 # Response schemas
 
 
@@ -92,6 +104,13 @@ class MerchantSummary(BaseModel):
     merchant: str = Field(description="Merchant name (masked)")
     amount: int = Field(description="Total amount in cents")
     count: int = Field(description="Number of transactions")
+    category: str | None = Field(
+        None, description="Primary category for this merchant in the selected window"
+    )
+    categories_breakdown: dict[str, int] | None = Field(
+        None,
+        description="Optional breakdown when a merchant spans multiple categories (amounts in cents)",
+    )
 
 
 class SpendingSummary(BaseModel):
@@ -121,6 +140,9 @@ class StatementDetailWithSummary(BaseModel):
     transactions_count: int = Field(description="Number of transactions")
     created_at: datetime = Field(description="Upload timestamp")
     spending_summary: SpendingSummary = Field(description="Spending breakdown and statistics")
+    money: MoneyMeta = Field(
+        description="Monetary representation for amounts in this response"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -139,6 +161,9 @@ class StatementListResult(BaseModel):
 
     statements: list[StatementListResponse]
     pagination: PaginationMeta
+    money: MoneyMeta = Field(
+        description="Monetary representation for amounts in this response"
+    )
 
 
 class TransactionListResult(BaseModel):
@@ -146,6 +171,9 @@ class TransactionListResult(BaseModel):
 
     transactions: list[TransactionResponse]
     pagination: PaginationMeta
+    money: MoneyMeta = Field(
+        description="Monetary representation for amounts in this response"
+    )
 
 
 # Error response schemas

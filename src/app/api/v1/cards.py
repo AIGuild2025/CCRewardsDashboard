@@ -8,13 +8,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.config import settings
 from app.core.errors import get_error
 from app.models.card import Card
 from app.models.statement import Statement
 from app.models.user import User
 from app.repositories.card import CardRepository
 from app.schemas.card import CardDetailResponse, CardListResult, CardResponse
-from app.schemas.statement import PaginationMeta, StatementListResponse, StatementListResult
+from app.schemas.statement import MoneyMeta, PaginationMeta, StatementListResponse, StatementListResult
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -261,4 +262,5 @@ async def get_card_statements(
             total=total,
             total_pages=total_pages,
         ),
+        money=MoneyMeta(currency=settings.currency, minor_unit=settings.currency_minor_unit),
     )

@@ -72,6 +72,7 @@ logs/
 *.tmp
 *.bak
 *.swp
+.tmp/
 temp/
 tmp/
 

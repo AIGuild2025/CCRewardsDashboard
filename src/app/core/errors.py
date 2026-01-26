@@ -60,13 +60,6 @@ ERROR_CATALOG: dict[str, dict] = {
         "suggestion": "The statement format may have changed. Please contact support if this persists.",
         "retry_allowed": False,
     },
-    "PARSE_006": {
-        "code": "PARSE_006",
-        "message": "Duplicate statement detected for same card and month",
-        "user_message": "You've already uploaded this statement.",
-        "suggestion": "This statement for the same card and month already exists in your account.",
-        "retry_allowed": False,
-    },
     "MASK_001": {
         "code": "MASK_001",
         "message": "PII masking failed to complete",
@@ -129,6 +122,34 @@ ERROR_CATALOG: dict[str, dict] = {
         "message": "Invalid PDF magic bytes",
         "user_message": "This file appears to be corrupt or is not a valid PDF.",
         "suggestion": "Please ensure you're uploading an actual PDF file, not a renamed file.",
+        "retry_allowed": False,
+    },
+    "API_006": {
+        "code": "API_006",
+        "message": "Transaction not found",
+        "user_message": "We couldn't find this transaction.",
+        "suggestion": "Please refresh and try again.",
+        "retry_allowed": False,
+    },
+    "API_007": {
+        "code": "API_007",
+        "message": "Invalid category",
+        "user_message": "That category isn't supported.",
+        "suggestion": "Please choose a category from the allowed list.",
+        "retry_allowed": False,
+    },
+    "API_008": {
+        "code": "API_008",
+        "message": "Category override not allowed for credit transactions",
+        "user_message": "You can only recategorize debit (spend) transactions.",
+        "suggestion": "Choose a debit transaction instead of a payment/refund.",
+        "retry_allowed": False,
+    },
+    "API_009": {
+        "code": "API_009",
+        "message": "Transaction merchant is missing",
+        "user_message": "We couldn't determine the merchant for this transaction.",
+        "suggestion": "Please choose a different transaction.",
         "retry_allowed": False,
     },
 }

@@ -21,7 +21,13 @@ class Card(BaseModel):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="cards")
-    statements: Mapped[list["Statement"]] = relationship("Statement", back_populates="card", lazy="selectin")
+    # Rely on DB-level ON DELETE CASCADE; prevent SQLAlchemy from NULLing FKs on delete.
+    statements: Mapped[list["Statement"]] = relationship(
+        "Statement",
+        back_populates="card",
+        lazy="selectin",
+        passive_deletes="all",
+    )
 
     def __repr__(self) -> str:
         return f"<Card(id={self.id}, bank={self.bank_code}, last_four={self.last_four})>"

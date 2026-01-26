@@ -6,7 +6,6 @@ appropriate HTTP status codes.
 """
 
 import logging
-import traceback
 from typing import Union
 
 from fastapi import Request, status
@@ -14,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from app.config import settings
 from app.core.errors import ERROR_CATALOG
 from app.core.exceptions import StatementProcessingError
 
@@ -35,16 +35,13 @@ async def handle_statement_processing_error(
     # Get error details from catalog
     error_info = ERROR_CATALOG.get(exc.error_code, {})
 
-    # Log the error with details
-    logger.error(
-        f"Statement processing error: {exc.error_code}",
-        extra={
-            "error_code": exc.error_code,
-            "details": exc.details,
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
+    # Avoid logging exception details in non-debug to reduce risk of leaking
+    # sensitive content (e.g., parser error messages).
+    extra = {"error_code": exc.error_code, "path": request.url.path, "method": request.method}
+    if settings.debug:
+        extra["details"] = exc.details
+
+    logger.error(f"Statement processing error: {exc.error_code}", extra=extra)
 
     # Return consistent error response
     return JSONResponse(
@@ -80,14 +77,10 @@ async def handle_validation_error(
         msg = error.get("msg", "Invalid value")
         error_messages.append(f"{field}: {msg}")
 
-    logger.warning(
-        f"Validation error on {request.url.path}",
-        extra={
-            "errors": errors,
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
+    extra = {"path": request.url.path, "method": request.method}
+    if settings.debug:
+        extra["errors"] = errors
+    logger.warning(f"Validation error on {request.url.path}", extra=extra)
 
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -113,14 +106,17 @@ async def handle_integrity_error(
     Returns:
         JSONResponse with error details
     """
-    logger.error(
-        f"Database integrity error on {request.url.path}",
-        extra={
-            "error": str(exc),
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
+    # Do not log str(exc): it can include SQL + bound parameters.
+    if settings.debug:
+        logger.exception(
+            f"Database integrity error on {request.url.path}",
+            extra={"path": request.url.path, "method": request.method},
+        )
+    else:
+        logger.error(
+            f"Database integrity error on {request.url.path}",
+            extra={"path": request.url.path, "method": request.method},
+        )
 
     # Check if it's a duplicate key error
     error_msg = str(exc).lower()
@@ -159,17 +155,25 @@ async def handle_generic_error(request: Request, exc: Exception) -> JSONResponse
     Returns:
         JSONResponse with generic error message
     """
-    # Log full stack trace for debugging
-    logger.error(
-        f"Unexpected error on {request.url.path}: {str(exc)}",
-        extra={
-            "error_type": type(exc).__name__,
-            "error_message": str(exc),
-            "path": request.url.path,
-            "method": request.method,
-            "traceback": traceback.format_exc(),
-        },
-    )
+    # In non-debug: do not log str(exc) or traceback (may include sensitive data).
+    if settings.debug:
+        logger.exception(
+            f"Unexpected error on {request.url.path}",
+            extra={
+                "error_type": type(exc).__name__,
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
+    else:
+        logger.error(
+            f"Unexpected error on {request.url.path}",
+            extra={
+                "error_type": type(exc).__name__,
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
 
     # Return generic error (don't expose internal details)
     return JSONResponse(

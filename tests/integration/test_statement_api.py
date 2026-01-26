@@ -2,7 +2,6 @@
 
 import io
 from datetime import date, datetime
-from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -22,37 +21,28 @@ class TestStatementUpload:
     """Test statement upload endpoint."""
 
     @pytest.mark.asyncio
-    async def test_upload_invalid_file_extension(
+    async def test_upload_invalid_content_type(
         self, client: AsyncClient, auth_headers: dict, test_user: User
     ):
-        """Test upload with non-PDF file returns API_001 error."""
-        # Create a fake text file
-        file_content = b"This is not a PDF"
-        files = {"file": ("statement.txt", file_content, "text/plain")}
-
+        """Test upload with non-PDF content-type returns API_001 error."""
         response = await client.post(
             "/api/v1/statements/upload",
-            files=files,
-            headers=auth_headers,
+            content=b"This is not a PDF",
+            headers={**auth_headers, "Content-Type": "text/plain"},
         )
 
         assert response.status_code == 400
         data = response.json()
         assert data["detail"]["error_code"] == "API_001"
-        assert "PDF" in data["detail"]["user_message"]
 
     @pytest.mark.asyncio
     async def test_upload_invalid_mime_type(
         self, client: AsyncClient, auth_headers: dict, test_user: User
     ):
         """Test upload with wrong MIME type returns API_001 error."""
-        # Create a file with .pdf extension but wrong MIME
-        file_content = b"This is not a PDF"
-        files = {"file": ("statement.pdf", file_content, "text/plain")}
-
         response = await client.post(
             "/api/v1/statements/upload",
-            files=files,
+            content=b"%PDF-" + b"fake",
             headers=auth_headers,
         )
 
@@ -67,18 +57,15 @@ class TestStatementUpload:
         """Test upload with file >25MB returns API_002 error."""
         # Create a file larger than 25MB
         large_content = b"%PDF-" + b"x" * (26 * 1024 * 1024)  # 26MB
-        files = {"file": ("statement.pdf", large_content, "application/pdf")}
-
         response = await client.post(
             "/api/v1/statements/upload",
-            files=files,
-            headers=auth_headers,
+            content=large_content,
+            headers={**auth_headers, "Content-Type": "application/pdf"},
         )
 
         assert response.status_code == 400
         data = response.json()
         assert data["detail"]["error_code"] == "API_002"
-        assert "25 MB" in data["detail"]["user_message"]
 
     @pytest.mark.asyncio
     async def test_upload_invalid_pdf_magic_bytes(
@@ -87,12 +74,10 @@ class TestStatementUpload:
         """Test upload with invalid PDF magic bytes returns API_005 error."""
         # Create a file with .pdf extension and correct MIME but invalid content
         file_content = b"Not a real PDF content"
-        files = {"file": ("statement.pdf", file_content, "application/pdf")}
-
         response = await client.post(
             "/api/v1/statements/upload",
-            files=files,
-            headers=auth_headers,
+            content=file_content,
+            headers={**auth_headers, "Content-Type": "application/pdf"},
         )
 
         assert response.status_code == 400
@@ -136,7 +121,8 @@ class TestStatementList:
                     user_id=test_user.id,
                     card_id=card1.id if i < 3 else card2.id,
                     statement_month=date(2024, i + 1, 1),
-                    closing_balance=Decimal("15000.00"),
+                    statement_period=date(2024, i + 1, 1),
+                    closing_balance=1500000,
                 )
             )
             statements.append(stmt)
@@ -296,7 +282,8 @@ class TestStatementDetail:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("15000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=1500000,
             )
         )
 
@@ -307,7 +294,7 @@ class TestStatementDetail:
                 statement_id=statement.id,
                 txn_date=date(2024, 1, 5),
                 merchant="Starbucks",
-                amount=Decimal("450.00"),
+                amount=45000,
                 category="dining",
                 is_credit=False,
                 reward_points=45,
@@ -317,7 +304,7 @@ class TestStatementDetail:
                 statement_id=statement.id,
                 txn_date=date(2024, 1, 10),
                 merchant="Amazon",
-                amount=Decimal("2500.00"),
+                amount=250000,
                 category="shopping",
                 is_credit=False,
                 reward_points=250,
@@ -327,7 +314,7 @@ class TestStatementDetail:
                 statement_id=statement.id,
                 txn_date=date(2024, 1, 12),
                 merchant="Shell",
-                amount=Decimal("1500.00"),
+                amount=150000,
                 category="fuel",
                 is_credit=False,
                 reward_points=150,
@@ -337,7 +324,7 @@ class TestStatementDetail:
                 statement_id=statement.id,
                 txn_date=date(2024, 1, 15),
                 merchant="Payment",
-                amount=Decimal("5000.00"),
+                amount=500000,
                 category="payment",
                 is_credit=True,
                 reward_points=0,
@@ -373,25 +360,30 @@ class TestStatementDetail:
         assert "spending_summary" in data
         summary = data["spending_summary"]
         
-        # Check totals
-        assert summary["total_debit"] == 4450.00  # 450 + 2500 + 1500
-        assert summary["total_credit"] == 5000.00
-        assert summary["net_spending"] == -550.00  # 4450 - 5000
+        # Check totals (amounts are stored/returned in cents)
+        assert summary["total_debit"] == 445000  # 45000 + 250000 + 150000
+        assert summary["total_credit"] == 500000
+        assert summary["net_spending"] == -55000  # 445000 - 500000
         
         # Check category breakdown
         assert "by_category" in summary
         categories = {cat["category"]: cat for cat in summary["by_category"]}
         assert "shopping" in categories
-        assert categories["shopping"]["amount"] == 2500.00
+        assert categories["shopping"]["amount"] == 250000
         assert categories["shopping"]["count"] == 1
         assert categories["shopping"]["reward_points"] == 250
         
         # Check top merchants
         assert "top_merchants" in summary
-        assert len(summary["top_merchants"]) == 4
+        assert len(summary["top_merchants"]) == 3  # debit-only
         # Verify sorted by amount DESC
         amounts = [m["amount"] for m in summary["top_merchants"]]
         assert amounts == sorted(amounts, reverse=True)
+        
+        merch_map = {m["merchant"]: m for m in summary["top_merchants"]}
+        assert merch_map["Starbucks"]["category"] == "dining"
+        assert merch_map["Amazon"]["category"] == "shopping"
+        assert merch_map["Shell"]["category"] == "fuel"
 
     @pytest.mark.asyncio
     async def test_get_statement_not_found(
@@ -442,7 +434,8 @@ class TestStatementDetail:
                 user_id=other_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("15000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=1500000,
             )
         )
         await db_session.commit()
@@ -488,7 +481,8 @@ class TestStatementTransactions:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("20000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=2000000,
             )
         )
 
@@ -504,7 +498,7 @@ class TestStatementTransactions:
                     statement_id=statement.id,
                     txn_date=date(2024, 1, (i % 28) + 1),
                     merchant=merchants[i % len(merchants)],
-                    amount=Decimal(str((i + 1) * 100)),
+                    amount=(i + 1) * 100,
                     category=categories[i % len(categories)],
                     is_credit=False,
                     reward_points=(i + 1) * 10,
@@ -668,7 +662,8 @@ class TestStatementDelete:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("15000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=1500000,
             )
         )
 
@@ -681,7 +676,7 @@ class TestStatementDelete:
                     statement_id=statement.id,
                     txn_date=date(2024, 1, i + 1),
                     merchant=f"Merchant {i}",
-                    amount=Decimal("1000.00"),
+                    amount=100000,
                     category="shopping",
                     is_credit=False,
                     reward_points=100,
@@ -696,7 +691,7 @@ class TestStatementDelete:
     async def test_delete_statement_success(
         self, client: AsyncClient, auth_headers: dict, setup_statement_for_delete: dict, db_session: AsyncSession
     ):
-        """Test soft deleting a statement."""
+        """Test permanently deleting a statement (and cascading transactions)."""
         statement = setup_statement_for_delete["statement"]
         transactions = setup_statement_for_delete["transactions"]
         
@@ -707,16 +702,16 @@ class TestStatementDelete:
 
         assert response.status_code == 204
 
-        # Verify statement is soft deleted
+        # Verify statement is deleted
         stmt_repo = StatementRepository(db_session)
         deleted_stmt = await stmt_repo.get_by_id(statement.id)
-        assert deleted_stmt.deleted_at is not None
+        assert deleted_stmt is None
 
-        # Verify transactions are also soft deleted
+        # Verify transactions are also deleted
         txn_repo = TransactionRepository(db_session)
         for txn in transactions:
             deleted_txn = await txn_repo.get_by_id(txn.id)
-            assert deleted_txn.deleted_at is not None
+            assert deleted_txn is None
 
     @pytest.mark.asyncio
     async def test_delete_statement_not_found(
@@ -767,7 +762,8 @@ class TestStatementDelete:
                 user_id=other_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("15000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=1500000,
             )
         )
         await db_session.commit()

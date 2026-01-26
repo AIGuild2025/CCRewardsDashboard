@@ -10,16 +10,18 @@ This module orchestrates the complete statement processing workflow:
 """
 
 import time
+import logging
 from datetime import date
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.errors import get_error
 from app.core.exceptions import (
     BankDetectionError,
-    DuplicateStatementError,
     MaskingError,
     PDFExtractionError,
     ParsingError,
@@ -27,15 +29,20 @@ from app.core.exceptions import (
 )
 from app.masking.pipeline import PIIMaskingPipeline
 from app.models.card import Card
+from app.models.merchant_category_override import MerchantCategoryOverride
 from app.models.statement import Statement
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.categorization.rules import categorize, normalize_merchant
 from app.parsers.factory import get_parser_factory
 from app.repositories.card import CardRepository
 from app.repositories.statement import StatementRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.internal import ParsedStatement
 from app.schemas.statement import StatementUploadResult
+
+
+logger = logging.getLogger(__name__)
 
 
 class StatementService:
@@ -86,7 +93,6 @@ class StatementService:
             ParsingError: If statement parsing fails
             ValidationError: If parsed data is invalid
             MaskingError: If PII masking fails
-            DuplicateStatementError: If statement already exists
         """
         start_time = time.time()
 
@@ -142,16 +148,14 @@ class StatementService:
             ParsingError: If parsing fails
         """
         try:
-            print("[SERVICE] Starting PDF parsing...")
+            logger.info("Starting PDF parsing")
             # Use ParserFactory to handle extraction, detection, and parsing
             parsed_statement = self.parser_factory.parse(pdf_bytes, password)
-            print(
-                f"[SERVICE] Parse complete: {len(parsed_statement.transactions)} transactions"
-            )
+            logger.info("Parse complete", extra={"transactions_count": len(parsed_statement.transactions)})
             return parsed_statement
 
         except ValueError as e:
-            print(f"[SERVICE] ValueError caught: {e}")
+            logger.warning("PDF parse error (ValueError)", extra={"error_type": type(e).__name__})
             error_msg = str(e).lower()
 
             # Map ValueError to specific error codes
@@ -172,7 +176,14 @@ class StatementService:
                 raise PDFExtractionError("PARSE_002") from e
 
         except Exception as e:
-            print(f"[SERVICE] Exception caught: {type(e).__name__}: {e}")
+            if settings.debug:
+                logger.exception(
+                    "Unexpected PDF parse error", extra={"error_type": type(e).__name__}
+                )
+            else:
+                logger.error(
+                    "Unexpected PDF parse error", extra={"error_type": type(e).__name__}
+                )
             # Catch-all for unexpected errors
             raise ParsingError("PARSE_005") from e
 
@@ -191,10 +202,8 @@ class StatementService:
         if not parsed.statement_month:
             raise ValidationError("VAL_001", {"field": "statement_month"})
 
-        # Temporarily allow 0 transactions for debugging
         if not parsed.transactions or len(parsed.transactions) == 0:
-            print(f"[SERVICE] WARNING: No transactions found in statement")
-            # raise ParsingError("PARSE_005", {"reason": "no_transactions"})
+            raise ParsingError("PARSE_005", {"reason": "no_transactions"})
 
         # Validate card last four is 4-5 characters
         if not (4 <= len(parsed.card_last_four) <= 5):
@@ -223,16 +232,19 @@ class StatementService:
             # Convert transactions to dict format for masking
             transactions_data = []
             for txn in parsed.transactions:
+                raw_cat = (txn.category or "").strip().lower()
                 txn_dict = {
                     "transaction_date": txn.transaction_date.isoformat(),
                     "description": txn.description,
                     "amount_cents": txn.amount_cents,
                     "transaction_type": txn.transaction_type,
-                    "category": txn.category,
+                    # Many banks do not provide a category/MCC. Infer if missing.
+                    "category": raw_cat
+                    or categorize(txn.description, transaction_type=txn.transaction_type),
                 }
                 transactions_data.append(txn_dict)
 
-            print(f"[SERVICE] Masking {len(transactions_data)} transactions...")
+            logger.info("Masking transactions", extra={"transactions_count": len(transactions_data)})
 
             # Mask transaction data (focuses on description field)
             masked_transactions = []
@@ -242,24 +254,64 @@ class StatementService:
                 )
                 masked_transactions.append(masked_txn)
 
-            print(f"[SERVICE] Masked {len(masked_transactions)} transactions")
+            # Apply user overrides (debit-only) after masking so merchant_key is derived
+            # from the persisted merchant string (masked) and cannot contain raw PII.
+            debit_keys: set[str] = set()
+            for t in masked_transactions:
+                if (t.get("transaction_type") or "").strip().lower() == "credit":
+                    continue
+                key = normalize_merchant(t.get("description"))
+                if key:
+                    debit_keys.add(key)
+
+            override_map: dict[str, str] = {}
+            if debit_keys:
+                result = await self.db.execute(
+                    select(MerchantCategoryOverride).where(
+                        MerchantCategoryOverride.user_id == user_id,
+                        MerchantCategoryOverride.deleted_at.is_(None),
+                        MerchantCategoryOverride.merchant_key.in_(sorted(debit_keys)),
+                    )
+                )
+                overrides = result.scalars().all()
+                override_map = {o.merchant_key: o.category for o in overrides}
+
+            if override_map:
+                for t in masked_transactions:
+                    if (t.get("transaction_type") or "").strip().lower() == "credit":
+                        continue
+                    key = normalize_merchant(t.get("description"))
+                    if key and key in override_map:
+                        t["category"] = override_map[key]
+
+            logger.info("Masked transactions", extra={"transactions_count": len(masked_transactions)})
 
             # Validate no PII leaked
             for masked_txn in masked_transactions:
                 masked_desc = masked_txn.get("description", "")
-                if not pipeline.validate_no_leaks(masked_desc, strict=False):
-                    raise MaskingError("MASK_002", {"field": "description"})
+                is_clean, detected = pipeline.validate_no_leaks(
+                    masked_desc, strict=True
+                )
+                if not is_clean:
+                    raise MaskingError(
+                        "MASK_002",
+                        {"field": "description", "detected": detected},
+                    )
 
-            print("[SERVICE] PII validation passed")
+            logger.info("PII validation passed")
             return {"transactions": masked_transactions}
 
         except MaskingError:
             raise
         except Exception as e:
-            print(f"[SERVICE] Masking error: {type(e).__name__}: {e}")
-            import traceback
-
-            traceback.print_exc()
+            if settings.debug:
+                logger.exception(
+                    "Masking pipeline failed", extra={"error_type": type(e).__name__}
+                )
+            else:
+                logger.error(
+                    "Masking pipeline failed", extra={"error_type": type(e).__name__}
+                )
             raise MaskingError("MASK_001") from e
 
     async def _persist_statement(
@@ -275,42 +327,114 @@ class StatementService:
         Returns:
             Tuple of (statement_id, card_id, transactions_count)
 
-        Raises:
-            DuplicateStatementError: If statement already exists
+        Notes:
+            This method is idempotent for the (user_id, card_id, statement_month) key.
+            If a statement already exists, it is updated in place and its transactions
+            are replaced.
         """
         try:
             # Step 1: Find or create card
-            print(
-                f"[SERVICE] Finding or creating card: last_four={parsed.card_last_four[-4:]}, bank_code={parsed.bank_code}"
-            )
+            logger.info("Finding or creating card", extra={"bank_code": parsed.bank_code})
             card = await self._find_or_create_card(
                 user_id=user_id,
                 last_four=parsed.card_last_four[-4:],  # Normalize to 4 digits
                 bank_code=parsed.bank_code,
             )
-            print(f"[SERVICE] Card ready: {card.id}")
+            logger.info("Card ready", extra={"card_id": str(card.id)})
 
-            # Step 2: Check for duplicate
-            print(f"[SERVICE] Checking for duplicate statement...")
+            # Step 2: Upsert statement (idempotent upload)
+            logger.info("Checking for existing statement (upsert)")
             existing = await self.statement_repo.get_by_card_and_month(
                 user_id=user_id, card_id=card.id, statement_month=parsed.statement_month
             )
+            if existing and existing.deleted_at is not None:
+                # Legacy cleanup: if a statement was previously "soft deleted",
+                # remove it fully so the user can upload a new copy.
+                #
+                # Use a SQL DELETE (not ORM instance delete) to rely on DB-level
+                # ON DELETE CASCADE and avoid SQLAlchemy trying to NULL child FKs.
+                await self.db.execute(delete(Statement).where(Statement.id == existing.id))
+                await self.db.flush()
+                existing = None
+
+            def build_masked_content() -> dict[str, Any]:
+                # Authoritative masked payload stored on the statement record.
+                return {
+                    "bank_code": parsed.bank_code,
+                    "card_last_four": parsed.card_last_four[-4:],
+                    "statement_month": parsed.statement_month.isoformat(),
+                    "statement_period": parsed.statement_month.isoformat(),
+                    "closing_balance_cents": parsed.closing_balance_cents,
+                    "reward_points": parsed.reward_points,
+                    "reward_points_earned": parsed.reward_points_earned,
+                    "metadata": {
+                        "statement_date": parsed.statement_date.isoformat()
+                        if parsed.statement_date
+                        else None,
+                        "due_date": parsed.due_date.isoformat() if parsed.due_date else None,
+                        "minimum_due_cents": parsed.minimum_due_cents,
+                    },
+                    "transactions": masked_data["transactions"],
+                }
+
             if existing:
-                raise DuplicateStatementError(
-                    "PARSE_006",
-                    {
-                        "card_id": str(card.id),
-                        "statement_month": parsed.statement_month.isoformat(),
+                # Update statement in place (UPSERT).
+                existing.document_type = "credit_card_statement"
+                existing.source_bank = parsed.bank_code or "unknown"
+                existing.statement_period = parsed.statement_month
+                existing.ingestion_status = "SUCCESS"
+                existing.masked_content = build_masked_content()
+
+                existing.closing_balance = parsed.closing_balance_cents
+                existing.reward_points = parsed.reward_points
+                existing.reward_points_earned = parsed.reward_points_earned
+
+                # Replace transactions (hard delete then insert).
+                await self.db.execute(
+                    delete(Transaction).where(Transaction.statement_id == existing.id)
+                )
+                transactions_count = 0
+                for masked_txn in masked_data["transactions"]:
+                    transaction = Transaction(
+                        statement_id=existing.id,
+                        user_id=user_id,
+                        txn_date=date.fromisoformat(masked_txn["transaction_date"]),
+                        merchant=masked_txn["description"],
+                        merchant_key=normalize_merchant(masked_txn.get("description")),
+                        category=masked_txn.get("category"),
+                        amount=masked_txn["amount_cents"],
+                        is_credit=masked_txn["transaction_type"].lower() == "credit",
+                        reward_points=0,
+                    )
+                    self.db.add(transaction)
+                    transactions_count += 1
+
+                await self.db.commit()
+                logger.info(
+                    "Upserted statement and replaced transactions",
+                    extra={
+                        "statement_id": str(existing.id),
+                        "transactions_count": transactions_count,
                     },
                 )
+                return existing.id, card.id, transactions_count
 
             # Step 3: Create statement
-            print(
-                f"[SERVICE] Creating statement: month={parsed.statement_month}, balance={parsed.closing_balance_cents}, rewards={parsed.reward_points}, earned={parsed.reward_points_earned}"
+            logger.info(
+                "Creating statement",
+                extra={
+                    "statement_month": parsed.statement_month.isoformat(),
+                    "bank_code": parsed.bank_code,
+                },
             )
             statement = Statement(
                 user_id=user_id,
                 card_id=card.id,
+                document_type="credit_card_statement",
+                source_bank=parsed.bank_code or "unknown",
+                statement_period=parsed.statement_month,
+                ingestion_status="SUCCESS",
+                masked_content=build_masked_content(),
                 statement_month=parsed.statement_month,
                 closing_balance=parsed.closing_balance_cents,
                 reward_points=parsed.reward_points,
@@ -318,11 +442,12 @@ class StatementService:
             )
             self.db.add(statement)
             await self.db.flush()  # Get statement.id
-            print(f"[SERVICE] Statement created: {statement.id}")
+            logger.info("Statement created", extra={"statement_id": str(statement.id)})
 
             # Step 4: Create transactions
-            print(
-                f"[SERVICE] Creating {len(masked_data['transactions'])} transactions..."
+            logger.info(
+                "Creating transactions",
+                extra={"transactions_count": len(masked_data["transactions"])},
             )
             transactions_count = 0
             for masked_txn in masked_data["transactions"]:
@@ -331,6 +456,7 @@ class StatementService:
                     user_id=user_id,
                     txn_date=date.fromisoformat(masked_txn["transaction_date"]),
                     merchant=masked_txn["description"],  # Masked merchant name
+                    merchant_key=normalize_merchant(masked_txn.get("description")),
                     category=masked_txn.get("category"),
                     amount=masked_txn["amount_cents"],
                     is_credit=masked_txn["transaction_type"].lower() == "credit",
@@ -339,28 +465,29 @@ class StatementService:
                 self.db.add(transaction)
                 transactions_count += 1
 
-            print(f"[SERVICE] Committing transaction...")
             # Step 5: Commit transaction
             await self.db.commit()
 
-            print(
-                f"[SERVICE] Successfully persisted: statement_id={statement.id}, transactions={transactions_count}"
+            logger.info(
+                "Persisted statement and transactions",
+                extra={
+                    "statement_id": str(statement.id),
+                    "transactions_count": transactions_count,
+                },
             )
             return statement.id, card.id, transactions_count
 
-        except DuplicateStatementError:
-            # Let outer exception handler handle rollback
-            raise
         except Exception as e:
-            print(f"[SERVICE] Persist error: {type(e).__name__}: {e}")
-            import traceback
-
-            traceback.print_exc()
+            if settings.debug:
+                logger.exception(
+                    "Database persistence failed", extra={"error_type": type(e).__name__}
+                )
+            else:
+                logger.error(
+                    "Database persistence failed", extra={"error_type": type(e).__name__}
+                )
             await self.db.rollback()
             raise
-        except Exception as e:
-            await self.db.rollback()
-            raise ParsingError("DB_001") from e
 
     async def _find_or_create_card(
         self, user_id: UUID, last_four: str, bank_code: str | None

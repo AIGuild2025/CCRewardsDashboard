@@ -3,6 +3,7 @@
 Overrides card number detection and date parsing to handle SBI's formats.
 """
 
+import logging
 import re
 from datetime import date, datetime
 from itertools import permutations
@@ -10,6 +11,9 @@ from typing import Any
 
 from app.parsers.generic import GenericParser
 from app.schemas.internal import ParsedTransaction
+
+
+logger = logging.getLogger(__name__)
 
 
 class SBIParser(GenericParser):
@@ -69,7 +73,7 @@ class SBIParser(GenericParser):
         Raises:
             ValueError: If card number not found
         """
-        print("[SBI PARSER] Attempting to find card number...")
+        logger.debug("Attempting to find card number (SBI)")
         # Try SBI-specific patterns first
         for i, pattern in enumerate(self.SBI_CARD_PATTERNS):
             match = re.search(pattern, full_text, re.IGNORECASE | re.MULTILINE)
@@ -78,21 +82,18 @@ class SBIParser(GenericParser):
                 # If only 2 digits found, pad with XX prefix
                 if len(digits) == 2:
                     result = f"XX{digits}"
-                    print(f"[SBI PARSER] Found card number: {result} (pattern {i+1})")
+                    logger.debug("Found card number (SBI pattern)", extra={"pattern": i + 1})
                     return result
-                print(f"[SBI PARSER] Found card number: {digits} (pattern {i+1})")
+                logger.debug("Found card number (SBI pattern)", extra={"pattern": i + 1})
                 return digits
 
         # Fall back to generic patterns
-        print("[SBI PARSER] SBI patterns failed, trying generic patterns...")
+        logger.debug("SBI card patterns failed; trying generic patterns")
         try:
             result = super()._find_card_number(elements, full_text)
-            print(f"[SBI PARSER] Found via generic: {result}")
+            logger.debug("Found card number via generic patterns")
             return result
         except ValueError:
-            # If still not found, show sample text for debugging
-            sample = full_text[:500] if len(full_text) > 500 else full_text
-            print(f"[SBI PARSER] Card number not found. Sample text:\n{sample}")
             # If still not found, provide helpful error
             raise ValueError(
                 "Could not find card number in SBI statement. "
@@ -155,7 +156,7 @@ class SBIParser(GenericParser):
         Returns:
             Closing balance of reward points
         """
-        print("[SBI PARSER] Extracting reward points...")
+        logger.debug("Extracting reward points (SBI)")
 
         # SBI reward summary is usually a 4-number row:
         #   Previous Balance, Earned, Redeemed/Expired, Closing Balance
@@ -282,14 +283,19 @@ class SBIParser(GenericParser):
                 continue
 
             previous, earned, redeemed, closing = assigned
-            print(
-                "[SBI PARSER] Reward points found via invariant: "
-                f"Previous={previous}, Earned={earned}, Redeemed={redeemed}, Closing={closing}"
+            logger.debug(
+                "Reward points found via invariant",
+                extra={
+                    "previous": previous,
+                    "earned": earned,
+                    "redeemed": redeemed,
+                    "closing": closing,
+                },
             )
             self._reward_points_earned = earned
             return closing
 
-        print("[SBI PARSER] Reward points not found, defaulting to 0")
+        logger.debug("Reward points not found; defaulting to 0")
         self._reward_points_earned = 0
         return 0
 
@@ -309,45 +315,137 @@ class SBIParser(GenericParser):
         Returns:
             List of parsed transactions
         """
-        print("[SBI PARSER] Extracting transactions...")
+        logger.debug("Extracting transactions (SBI)")
         transactions = []
 
-        # Pattern: DD MMM YY MERCHANT... AMOUNT C/D
-        # The merchant name can span multiple words/lines
-        pattern = r"(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2})\s+(.+?)\s+([\d,]+\.\d{2})\s+([CD])"
+        date_token = re.compile(
+            r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2}",
+            re.IGNORECASE,
+        )
+        row_date_pat = r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2}"
+        # Row match that can find multiple transactions inside one stitched line.
+        # The lookahead ensures we stop at the next row's date token (or end).
+        row_pat = re.compile(
+            rf"(?P<date>{row_date_pat})\s+(?P<merchant>.+?)\s+"
+            rf"(?P<amount>[\d,]+\.\d{{2}})\s*(?P<cd>[CD])"
+            rf"(?=\s*{row_date_pat}|\s*$)",
+            re.IGNORECASE | re.DOTALL,
+        )
 
-        for match in re.finditer(pattern, full_text, re.IGNORECASE):
+        def _clean_merchant_text(text: str) -> str:
+            """Clean common OCR/layout artifacts for merchant/description.
+
+            SBI statements can include an extra "value date" column and some PDF
+            extractors may interleave the next row's merchant into the current
+            row's description. We apply a conservative cleanup:
+            - If we see an embedded transaction date token (DD Mon YY), truncate
+              at that point (keeps the merchant for this row only).
+            - Remove trailing date tokens like "16 Dec 25" which are almost
+              always a value-date artifact in the description field.
+            """
+            original = re.sub(r"\s+", " ", (text or "").strip())
+            if not original:
+                return original
+            s = original
+
+            dates = list(date_token.finditer(s))
+            if dates:
+                # If there's an embedded date token inside the merchant string,
+                # it's almost always the next row bleeding into this row.
+                # Keep the part before the first embedded date.
+                if dates[0].start() > 0:
+                    s = s[: dates[0].start()].rstrip()
+
+            # Strip a trailing value-date, if present.
+            s = re.sub(
+                r"\s+\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2}\s*$",
+                "",
+                s,
+                flags=re.IGNORECASE,
+            )
+            cleaned = s.strip()
+            # Avoid dropping transactions due to an over-aggressive cleanup.
+            return cleaned if cleaned else original
+
+        # Parse line-by-line first (most reliable for SBI; avoids cross-row mixing).
+        # Unstructured can wrap long merchants onto the next line, so we stitch
+        # continuation lines into the prior row until the next date token.
+        stitched_rows: list[str] = []
+        current: str | None = None
+        for raw_line in full_text.splitlines():
+            line = re.sub(r"\s+", " ", (raw_line or "").strip())
+            if not line:
+                continue
+            if re.match(rf"^{row_date_pat}\b", line, re.IGNORECASE):
+                if current:
+                    stitched_rows.append(current)
+                current = line
+            else:
+                if current:
+                    current = f"{current} {line}"
+        if current:
+            stitched_rows.append(current)
+
+        for row in stitched_rows:
             try:
-                date_str = match.group(1)  # "15 Dec 25"
-                merchant = match.group(2).strip()  # "APOLLO PHARMACIES LIMI IN"
-                amount_str = match.group(3).replace(",", "")  # "1138.82"
-                txn_type = match.group(4)  # "C" or "D"
+                for m in row_pat.finditer(row):
+                    date_str = m.group("date")
+                    merchant = _clean_merchant_text(m.group("merchant"))
+                    amount_str = m.group("amount").replace(",", "")
+                    txn_type = m.group("cd")
 
-                # Parse date
-                txn_date = self._parse_date(date_str)
+                    txn_date = self._parse_date(date_str)
+                    amount_cents = int(float(amount_str) * 100)
+                    transaction_type = "credit" if txn_type.upper() == "C" else "debit"
 
-                # Parse amount
-                amount_cents = int(float(amount_str) * 100)
-
-                # Determine transaction type
-                transaction_type = 'credit' if txn_type.upper() == 'C' else 'debit'
-
-                transaction = ParsedTransaction(
-                    transaction_date=txn_date,
-                    description=merchant,
-                    amount_cents=amount_cents,
-                    transaction_type=transaction_type,
-                    category=None  # SBI doesn't provide category
-                )
-                transactions.append(transaction)
-
+                    transactions.append(
+                        ParsedTransaction(
+                            transaction_date=txn_date,
+                            description=merchant,
+                            amount_cents=amount_cents,
+                            transaction_type=transaction_type,
+                            category=None,
+                        )
+                    )
             except Exception as e:
-                print(
-                    f"[SBI PARSER] Failed to parse transaction: {match.group(0)[:50]} - {e}"
+                logger.debug(
+                    "Failed to parse a transaction row",
+                    extra={"error_type": type(e).__name__},
                 )
                 continue
 
-        print(f"[SBI PARSER] Extracted {len(transactions)} transactions")
+        # Last resort: if line stitching produced nothing (e.g., extractor removed
+        # newlines), fall back to the original whole-text scan but keep matches
+        # strictly bounded by row structure.
+        if not transactions:
+            pattern = re.compile(
+                rf"({row_date_pat})\s+(.+?)\s+([\d,]+\.\d{{2}})\s*([CD])\b",
+                re.IGNORECASE | re.DOTALL,
+            )
+            for match in pattern.finditer(full_text):
+                try:
+                    date_str = match.group(1)
+                    merchant = _clean_merchant_text(match.group(2))
+                    amount_str = match.group(3).replace(",", "")
+                    txn_type = match.group(4)
+
+                    txn_date = self._parse_date(date_str)
+                    amount_cents = int(float(amount_str) * 100)
+                    transaction_type = "credit" if txn_type.upper() == "C" else "debit"
+
+                    transactions.append(
+                        ParsedTransaction(
+                            transaction_date=txn_date,
+                            description=merchant,
+                            amount_cents=amount_cents,
+                            transaction_type=transaction_type,
+                            category=None,
+                        )
+                    )
+                except Exception:
+                    continue
+
+        logger.info("Extracted transactions", extra={"transactions_count": len(transactions)})
         return (
             transactions
             if transactions
@@ -373,7 +471,7 @@ class SBIParser(GenericParser):
         Raises:
             ValueError: If statement period not found
         """
-        print("[SBI PARSER] Looking for statement period...")
+        logger.debug("Looking for statement period (SBI)")
 
         # SBI-specific patterns - single statement date
         # Note: OCR may put other text between "Statement Date" and the actual date
@@ -387,10 +485,10 @@ class SBIParser(GenericParser):
             match = re.search(pattern, full_text, re.IGNORECASE)
             if match:
                 date_str = match.group(1)
-                print(f"[SBI PARSER] Found statement date (pattern {i+1}): {date_str}")
+                logger.debug("Found statement date (SBI pattern)", extra={"pattern": i + 1})
                 statement_date = self._parse_date(date_str)
                 result = date(statement_date.year, statement_date.month, 1)
-                print(f"[SBI PARSER] Statement month: {result}")
+                logger.debug("Derived statement month (SBI)")
                 return result
 
         # Try period range patterns
@@ -405,20 +503,15 @@ class SBIParser(GenericParser):
             if match:
                 # Parse the end date and get the month
                 end_date_str = match.group(2)
-                print(
-                    f"[SBI PARSER] Found period (pattern {i+1}): {match.group(1)} to {end_date_str}"
-                )
+                logger.debug("Found statement period range (SBI pattern)", extra={"pattern": i + 1})
                 end_date = self._parse_date(end_date_str)
                 result = date(end_date.year, end_date.month, 1)
-                print(f"[SBI PARSER] Statement month: {result}")
+                logger.debug("Derived statement month (SBI)")
                 return result
 
         # Fall back to generic patterns
-        print("[SBI PARSER] SBI period patterns failed, trying generic...")
+        logger.debug("SBI period patterns failed; trying generic patterns")
         try:
             return super()._find_statement_period(elements, full_text)
         except ValueError:
-            # Show sample text for debugging
-            sample = full_text[:1000] if len(full_text) > 1000 else full_text
-            print(f"[SBI PARSER] Statement period not found. Sample text:\n{sample}")
             raise ValueError("Could not find statement period in SBI statement")

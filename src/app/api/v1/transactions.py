@@ -4,15 +4,29 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, func, or_, select
+from fastapi import APIRouter, Depends, Query, status, HTTPException
+from sqlalchemy import and_, bindparam, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.categorization.rules import CATEGORIES, categorize, normalize_merchant
+from app.config import settings
+from app.core.errors import get_error
+from app.models.merchant_category_override import MerchantCategoryOverride
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.schemas.overrides import (
+    MerchantCategoryOverrideDeleteResult,
+    MerchantCategoryOverrideListResult,
+    MerchantCategoryOverrideResponse,
+)
+from app.schemas.transaction import (
+    TransactionCategoryOverrideRequest,
+    TransactionCategoryOverrideResponse,
+)
 from app.schemas.statement import (
     CategorySummary,
+    MoneyMeta,
     PaginationMeta,
     TransactionListResult,
     TransactionResponse,
@@ -174,6 +188,7 @@ async def list_transactions(
             total=total,
             total_pages=total_pages,
         ),
+        money=MoneyMeta(currency=settings.currency, minor_unit=settings.currency_minor_unit),
     )
 
 
@@ -268,3 +283,280 @@ async def get_spending_summary(
     summaries.sort(key=lambda x: x.amount, reverse=True)
 
     return summaries
+
+
+@router.put(
+    "/{transaction_id}/category",
+    response_model=TransactionCategoryOverrideResponse,
+    summary="Override merchant category (user-scoped)",
+    description="""
+    Override the category for a merchant based on an existing transaction.
+
+    - Overrides apply to the authenticated user only
+    - Only debit transactions can be overridden (credits like payments/refunds are excluded)
+    - The override is applied to matching past debit transactions for immediate trend correction
+    """,
+    responses={
+        200: {"description": "Override saved"},
+        400: {"description": "Invalid category or transaction type"},
+        404: {"description": "Transaction not found"},
+    },
+)
+async def set_merchant_category_override(
+    transaction_id: UUID,
+    payload: TransactionCategoryOverrideRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TransactionCategoryOverrideResponse:
+    category = (payload.category or "").strip().lower()
+    if category not in CATEGORIES:
+        error_def = get_error("API_007")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "API_007",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == transaction_id,
+            Transaction.user_id == current_user.id,
+            Transaction.deleted_at.is_(None),
+        )
+    )
+    txn = result.scalar_one_or_none()
+    if not txn:
+        error_def = get_error("API_006")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "API_006",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    if txn.is_credit:
+        error_def = get_error("API_008")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "API_008",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    merchant = txn.merchant
+    if not merchant:
+        error_def = get_error("API_009")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "API_009",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    merchant_key = txn.merchant_key or normalize_merchant(merchant)
+    if not merchant_key:
+        error_def = get_error("API_009")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "API_009",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    # Ensure this transaction has merchant_key for future queries.
+    if txn.merchant_key != merchant_key:
+        txn.merchant_key = merchant_key
+        await db.flush()
+
+    # Upsert override row (revive if previously soft deleted).
+    existing = (
+        await db.execute(
+            select(MerchantCategoryOverride).where(
+                MerchantCategoryOverride.user_id == current_user.id,
+                MerchantCategoryOverride.merchant_key == merchant_key,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.category = category
+        existing.deleted_at = None
+    else:
+        db.add(
+            MerchantCategoryOverride(
+                user_id=current_user.id,
+                merchant_key=merchant_key,
+                category=category,
+            )
+        )
+
+    # Backfill matching debit transactions so trends update immediately.
+    upd = await db.execute(
+        update(Transaction)
+        .where(
+            Transaction.user_id == current_user.id,
+            Transaction.deleted_at.is_(None),
+            Transaction.is_credit == False,
+            Transaction.merchant_key == merchant_key,
+        )
+        .values(category=category)
+    )
+    await db.commit()
+
+    return TransactionCategoryOverrideResponse(
+        transaction_id=txn.id,
+        merchant=txn.merchant,
+        merchant_key=merchant_key,
+        category=category,
+        updated_transactions_count=int(upd.rowcount or 0),
+    )
+
+
+@router.get(
+    "/category-overrides",
+    response_model=MerchantCategoryOverrideListResult,
+    summary="List merchant category overrides",
+    description="""
+    List user-scoped merchant category overrides.
+
+    These overrides are applied during ingestion and can be used to backfill
+    existing transactions for more accurate trends.
+    """,
+)
+async def list_merchant_category_overrides(
+    page: Annotated[int, Query(ge=1, description="Page number (1-indexed)")] = 1,
+    limit: Annotated[int, Query(ge=1, le=100, description="Items per page (1-100)")] = 20,
+    search: Annotated[str | None, Query(description="Search by merchant key")] = None,
+    category: Annotated[str | None, Query(description="Filter by category")] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MerchantCategoryOverrideListResult:
+    q = select(MerchantCategoryOverride).where(
+        MerchantCategoryOverride.user_id == current_user.id,
+        MerchantCategoryOverride.deleted_at.is_(None),
+    )
+
+    if search:
+        q = q.where(
+            MerchantCategoryOverride.merchant_key.ilike(
+                f"%{normalize_merchant(search)}%"
+            )
+        )
+    if category:
+        q = q.where(MerchantCategoryOverride.category == category.strip().lower())
+
+    # Count first
+    count_q = select(func.count()).select_from(q.subquery())
+    total = (await db.execute(count_q)).scalar() or 0
+
+    # Page
+    q = q.order_by(MerchantCategoryOverride.updated_at.desc())
+    offset = (page - 1) * limit
+    q = q.offset(offset).limit(limit)
+
+    overrides = (await db.execute(q)).scalars().all()
+
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return MerchantCategoryOverrideListResult(
+        overrides=[MerchantCategoryOverrideResponse.model_validate(o) for o in overrides],
+        pagination=PaginationMeta(
+            page=page, limit=limit, total=total, total_pages=total_pages
+        ),
+    )
+
+
+@router.delete(
+    "/category-overrides/{override_id}",
+    response_model=MerchantCategoryOverrideDeleteResult,
+    summary="Delete merchant category override",
+    description="""
+    Delete a merchant category override.
+
+    If `recompute=true`, the backend recomputes affected debit transactions using
+    the deterministic rules fallback (no override, no parser category).
+    """,
+)
+async def delete_merchant_category_override(
+    override_id: UUID,
+    recompute: Annotated[
+        bool, Query(description="Recompute affected debit transactions after delete")
+    ] = False,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MerchantCategoryOverrideDeleteResult:
+    ov = (
+        await db.execute(
+            select(MerchantCategoryOverride).where(
+                MerchantCategoryOverride.id == override_id,
+                MerchantCategoryOverride.user_id == current_user.id,
+                MerchantCategoryOverride.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if not ov:
+        # Reuse "not found" semantics.
+        error_def = get_error("API_006")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "API_006",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    merchant_key = ov.merchant_key
+
+    recomputed = 0
+    if recompute:
+        # Fetch affected debit transactions and recompute categories using the
+        # deterministic rules fallback.
+        txns = (
+            await db.execute(
+                select(Transaction.id, Transaction.merchant).where(
+                    Transaction.user_id == current_user.id,
+                    Transaction.deleted_at.is_(None),
+                    Transaction.is_credit == False,
+                    Transaction.merchant_key == merchant_key,
+                )
+            )
+        ).all()
+
+        params = []
+        for txn_id, merchant in txns:
+            params.append(
+                {
+                    "b_id": txn_id,
+                    "b_category": categorize(merchant, transaction_type="debit"),
+                }
+            )
+        if params:
+            await db.execute(
+                update(Transaction.__table__)
+                .where(Transaction.__table__.c.id == bindparam("b_id"))
+                .values(category=bindparam("b_category")),
+                params,
+                execution_options={"synchronize_session": False},
+            )
+            recomputed = len(params)
+            # Keep session identity-map consistent for this request.
+            db.expire_all()
+
+    # Hard delete the override row.
+    await db.delete(ov)
+    await db.commit()
+
+    return MerchantCategoryOverrideDeleteResult(
+        id=override_id, merchant_key=merchant_key, recomputed_transactions_count=recomputed
+    )

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     
     # Application
     app_env: str = "development"
-    debug: bool = True
+    debug: bool = False
     log_level: str = "INFO"
     
     # Server
@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str
+    db_echo: bool = False
     
     # JWT
     jwt_secret: str
@@ -28,11 +29,15 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 7
     
     # Parsing
-    pdf_max_size_mb: int = 10
+    pdf_max_size_mb: int = 25
     parse_timeout_seconds: int = 60
     
     # PII Masking
     presidio_confidence: float = 0.7
+
+    # Money / amounts
+    currency: str = "INR"
+    currency_minor_unit: int = 2
 
 
 settings = Settings()

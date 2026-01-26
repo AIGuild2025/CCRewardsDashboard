@@ -8,21 +8,21 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
-    File,
-    Form,
+    Header,
     HTTPException,
     Query,
-    UploadFile,
+    Request,
     status,
 )
 from sqlalchemy import and_, func, select
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.config import settings
 from app.core.errors import get_error
 from app.core.exceptions import (
     BankDetectionError,
-    DuplicateStatementError,
     MaskingError,
     PDFExtractionError,
     ParsingError,
@@ -36,6 +36,7 @@ from app.repositories.statement import StatementRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.statement import (
     CategorySummary,
+    MoneyMeta,
     MerchantSummary,
     PaginationMeta,
     ProcessingErrorDetail,
@@ -53,7 +54,6 @@ from app.services.statement import StatementService
 router = APIRouter(prefix="/statements", tags=["statements"])
 
 # Constants
-MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
 PDF_MAGIC_BYTES = b"%PDF-"
 ALLOWED_LIMITS = [10, 20, 50, 100]
 
@@ -116,14 +116,14 @@ async def trigger_rag_processing(statement_id: UUID, user_id: UUID) -> None:
 
     ## File Requirements
     - Format: PDF only
-    - Maximum size: 25MB
-    - Supports password-protected PDFs (provide password parameter)
+    - Request body must be raw PDF bytes (`Content-Type: application/pdf`)
+    - Maximum size: configurable via `PDF_MAX_SIZE_MB` (default: 25MB)
+    - Supports password-protected PDFs (optional `X-PDF-Password` header)
 
     ## Error Codes
     - PARSE_003: PDF requires password - retry with password
     - PARSE_004: Incorrect password - verify and retry
     - PARSE_001: Unsupported bank format
-    - PARSE_006: Duplicate statement already uploaded
     - API_001: Invalid file type
     - API_002: File too large
     - API_005: Invalid PDF file
@@ -140,13 +140,12 @@ async def trigger_rag_processing(statement_id: UUID, user_id: UUID) -> None:
 )
 async def upload_statement(
     background_tasks: BackgroundTasks,
-    file: Annotated[UploadFile, File(description="PDF statement file (max 25MB)")],
+    request: Request,
     password: Annotated[
         str | None,
-        Form(
-            description="Optional password for encrypted PDFs. "
-            "If PDF is password-protected and no password provided, "
-            "response will include error code PARSE_003.",
+        Header(
+            alias="X-PDF-Password",
+            description="Optional password for encrypted PDFs.",
         ),
     ] = None,
     current_user: User = Depends(get_current_user),
@@ -171,8 +170,9 @@ async def upload_statement(
     Raises:
         HTTPException: Various status codes for different error conditions
     """
-    # Validate file extension
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
+    # Validate content type (raw body upload, no multipart).
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
+    if content_type.lower() != "application/pdf":
         error_def = get_error("API_001")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -183,28 +183,34 @@ async def upload_statement(
             },
         )
 
-    # Validate content type
-    if file.content_type != "application/pdf":
-        error_def = get_error("API_001")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error_code": "API_001",
-                "user_message": error_def["user_message"],
-                "suggestion": error_def["suggestion"],
-            },
-        )
-
-    # Read file content
-    pdf_bytes = await file.read()
+    # Read request body in-memory with a strict size cap (no disk spooling).
+    max_bytes = settings.pdf_max_size_mb * 1024 * 1024
+    buf = bytearray()
+    total = 0
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            error_def = get_error("API_002")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "API_002",
+                    "user_message": error_def["user_message"],
+                    "suggestion": error_def["suggestion"],
+                },
+            )
+        buf.extend(chunk)
+    pdf_bytes = bytes(buf)
 
     # Validate file size
-    if len(pdf_bytes) > MAX_FILE_SIZE:
-        error_def = get_error("API_002")
+    if not pdf_bytes:
+        error_def = get_error("API_005")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "error_code": "API_002",
+                "error_code": "API_005",
                 "user_message": error_def["user_message"],
                 "suggestion": error_def["suggestion"],
             },
@@ -240,7 +246,6 @@ async def upload_statement(
         ParsingError,
         ValidationError,
         MaskingError,
-        DuplicateStatementError,
     ) as e:
         error_response = create_error_response(e)
         raise HTTPException(
@@ -349,6 +354,7 @@ async def list_statements(
         pagination=PaginationMeta(
             page=page, limit=limit, total=total, total_pages=total_pages
         ),
+        money=MoneyMeta(currency=settings.currency, minor_unit=settings.currency_minor_unit),
     )
 
 
@@ -390,7 +396,7 @@ async def get_statement_detail(
     repo = StatementRepository(db)
     statement = await repo.get_by_id(statement_id)
 
-    if not statement:
+    if not statement or statement.deleted_at is not None:
         error_def = get_error("API_003")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -425,9 +431,11 @@ async def get_statement_detail(
     total_credit = sum(t.amount for t in transactions if t.is_credit)
     net_spending = total_debit - total_credit
 
-    # Group by category
+    debit_transactions = [t for t in transactions if not t.is_credit]
+
+    # Group by category (debit-only for "expenditure").
     category_map: dict[str, dict] = {}
-    for t in transactions:
+    for t in debit_transactions:
         category = t.category or "Uncategorized"
         if category not in category_map:
             category_map[category] = {"amount": 0, "count": 0, "reward_points": 0}
@@ -445,18 +453,37 @@ async def get_statement_detail(
         reverse=True,
     )
 
-    # Group by merchant (top 10)
+    # Group by merchant (top 10) (debit-only for "expenditure").
     merchant_map: dict[str, dict] = {}
-    for t in transactions:
+    for t in debit_transactions:
         merchant = t.merchant
         if merchant not in merchant_map:
-            merchant_map[merchant] = {"amount": 0, "count": 0}
+            merchant_map[merchant] = {"amount": 0, "count": 0, "categories": {}}
         merchant_map[merchant]["amount"] += t.amount
         merchant_map[merchant]["count"] += 1
+        cat = t.category or "Uncategorized"
+        merchant_map[merchant]["categories"][cat] = (
+            merchant_map[merchant]["categories"].get(cat, 0) + t.amount
+        )
 
     # Sort merchants by amount, take top 10
     top_merchants = sorted(
-        [MerchantSummary(merchant=merch, **data) for merch, data in merchant_map.items()],
+        [
+            MerchantSummary(
+                merchant=merch,
+                amount=data["amount"],
+                count=data["count"],
+                category=(
+                    max(data["categories"].items(), key=lambda kv: kv[1])[0]
+                    if data["categories"]
+                    else None
+                ),
+                categories_breakdown=(
+                    data["categories"] if len(data["categories"]) > 1 else None
+                ),
+            )
+            for merch, data in merchant_map.items()
+        ],
         key=lambda x: x.amount,
         reverse=True,
     )[:10]
@@ -481,6 +508,7 @@ async def get_statement_detail(
         transactions_count=len(transactions),
         created_at=statement.created_at,
         spending_summary=summary,
+        money=MoneyMeta(currency=settings.currency, minor_unit=settings.currency_minor_unit),
     )
 
 
@@ -555,7 +583,7 @@ async def list_transactions(
     repo = StatementRepository(db)
     statement = await repo.get_by_id(statement_id)
 
-    if not statement:
+    if not statement or statement.deleted_at is not None:
         error_def = get_error("API_003")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -646,6 +674,7 @@ async def list_transactions(
         pagination=PaginationMeta(
             page=page, limit=limit, total=total, total_pages=total_pages
         ),
+        money=MoneyMeta(currency=settings.currency, minor_unit=settings.currency_minor_unit),
     )
 
 
@@ -654,9 +683,9 @@ async def list_transactions(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete statement",
     description="""
-    Soft delete a statement. The statement will be hidden but not permanently removed.
+    Permanently delete a statement and its transactions.
 
-    This operation also soft deletes all associated transactions.
+    This operation is irreversible.
     """,
     responses={
         204: {"description": "Statement deleted successfully"},
@@ -670,7 +699,7 @@ async def delete_statement(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """
-    Soft delete a statement and its transactions.
+    Permanently delete a statement and its transactions.
 
     Args:
         statement_id: Statement ID to delete
@@ -706,13 +735,6 @@ async def delete_statement(
             },
         )
 
-    # Soft delete statement
-    await repo.soft_delete(statement_id)
-
-    # Soft delete all associated transactions
-    transaction_repo = TransactionRepository(db)
-    transactions = await transaction_repo.get_by_statement(current_user.id, statement_id)
-    for transaction in transactions:
-        await transaction_repo.soft_delete(transaction.id)
-
+    # Hard delete in all cases. Use a SQL DELETE to rely on DB-level ON DELETE CASCADE.
+    await db.execute(sa_delete(Statement).where(Statement.id == statement.id))
     await db.commit()

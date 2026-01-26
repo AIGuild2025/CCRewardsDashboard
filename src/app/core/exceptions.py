@@ -84,16 +84,6 @@ class MaskingError(StatementProcessingError):
     pass
 
 
-class DuplicateStatementError(StatementProcessingError):
-    """Raised when attempting to upload a statement that already exists.
-
-    Duplicate detection is based on (card_id, statement_month).
-    Maps to error code PARSE_006.
-    """
-
-    pass
-
-
 class ValidationError(StatementProcessingError):
     """Raised when parsed data fails validation.
 

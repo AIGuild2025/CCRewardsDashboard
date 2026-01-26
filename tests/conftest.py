@@ -45,6 +45,8 @@ async def setup_database():
     can run without requiring a local Postgres instance.
     """
     from app.models.base import BaseModel
+    # Ensure all models are imported so metadata includes every table.
+    import app.models  # noqa: F401
     
     async with test_engine.begin() as conn:
         # Create all tables

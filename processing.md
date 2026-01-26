@@ -1,5 +1,69 @@
 # Secure Credit Card Statement Ingestion & Analysis Architecture
 
+## 0. Alignment Checklist (TODO)
+
+Use this section to track whether the implementation matches the goals in this document. Check items off only when verified in code + tests.
+
+### 0.1 Current Decisions (Confirmed)
+
+- [x] Duplicate definition: "same statement" = same month statement for a particular bank + card (per user).
+- [x] Duplicate handling: upload should be idempotent and update-in-place (return same `statement_id`) rather than rejecting.
+
+### 0.2 Gaps To Close (Ordered)
+
+#### A) Ingestion Model (Section 4.1)
+
+- [x] Guarantee **no OS-level spooling / temp files** during upload by accepting raw PDF bytes (no multipart parser / `UploadFile`).
+- [x] Enforce "in-memory only" PDF bytes end-to-end with a streaming size cap (`PDF_MAX_SIZE_MB`, default 25MB).
+
+#### B) Persistence Boundary (Section 4.3)
+
+- [x] Ensure **no unmasked PII crosses the persistence boundary** (fix PII leak validation so it actually blocks persistence).
+- [x] Ensure logs never contain raw statement text / unmasked identifiers (see Section 8 assumptions).
+
+#### C) Database Schema Alignment (Section 6)
+
+- [x] Align `statements` to be the authoritative record with a `masked_content` (masked JSON payload) column as described in Section 6.1.
+- [x] Add/align `document_type`, `source_bank`, `statement_period`, `ingestion_status` fields per Section 6.1.
+- [x] Reconcile ownership model naming: doc uses `owner_user_id`; implementation uses `user_id` (same semantics; `user_id` is the owner).
+
+#### D) Duplicate + Delete Semantics (Linked to Sections 5 + 6)
+
+- [x] Implement idempotent **UPSERT** for `(user_id, bank_code, card_last_four, statement_month)`:
+  - Update statement fields in place
+  - Replace transactions for that statement (delete + insert)
+  - Return the same `statement_id`
+- [x] Fix soft-delete conflict: re-upload after delete must work (unique constraints must ignore `deleted_at` or re-activate the row).
+
+#### E) Logging / Operational Safety (Section 8 assumptions)
+
+- [x] Remove/guard debug prints of extracted PDF text and other sensitive content.
+- [x] Default DB SQL echo to off in non-dev environments; confirm no sensitive values are logged.
+
+#### F) Tests / Verification
+
+- [x] Add tests that prove: (1) no raw PDFs persist, (2) no PII leaks persist, (3) upsert semantics work, (4) delete + re-upload works.
+
+#### G) Transaction Categorization (Rewards/LLM Input)
+
+- [x] Add deterministic, rule-based categorization for banks that don't provide categories (e.g., SBI), so dashboard/LLM has usable spend buckets.
+- [ ] Refine categorization rules over time using real statement patterns (UPI/transfer heuristics, ambiguous merchants, etc.).
+- [x] Add a user-override mechanism (merchant -> category) so users can correct mistakes and future ingestions stay consistent.
+  - Phase 1 (Schema Foundations)
+    - [x] Add `transactions.merchant_key` (normalized merchant) + index for fast lookups/rollups (keep `transactions.merchant` unchanged).
+    - [x] Add `merchant_category_overrides` table keyed by `(user_id, merchant_key)` with `category` and timestamps.
+  - Phase 2 (Ingestion Integration)
+    - [x] During ingestion: populate `transactions.merchant_key` and apply override-first categorization (override -> parser category -> rules fallback).
+  - Phase 3 (User API)
+    - [x] Add endpoint to set override via `transaction_id` (debit-only) with taxonomy validation.
+    - [x] On override set: backfill existing matching debit transactions (update `transactions.category`) for immediate trend correctness.
+  - Phase 4 (Read/UX Support)
+    - [x] Add endpoint to list overrides (pagination + search by merchant_key).
+    - [x] Add endpoint to delete an override and optionally recompute affected transactions via rules fallback.
+  - Phase 5 (Tests/Verification)
+    - [x] Unit tests for normalization + override precedence.
+    - [x] Integration tests: override set updates existing rows and affects spend summary/top merchants outputs.
+
 ## 1. Overview
 
 This document describes the backend architecture for a **secure, privacy-by-design financial statement ingestion system**. The primary goal is to enable users to upload bank or credit‑card statements, extract insights, and leverage AI‑driven analysis **without persisting raw documents or exposing Personally Identifiable Information (PII)**.
@@ -36,7 +100,7 @@ The architecture is intentionally designed to:
 
 ```
 Client (Browser)
-   ↓  (PDF multipart upload)
+   ↓  (PDF upload: raw bytes)
 Backend API (FastAPI)
    ↓
 In‑Memory PDF Bytes (no filesystem)
@@ -62,7 +126,7 @@ Analytics / Dashboard / RAG (masked data only)
 
 ### 4.1 Ingestion Model
 
-* PDF statements are received as HTTP multipart streams
+* PDF statements are received as raw HTTP request bodies (`Content-Type: application/pdf`)
 * Files are read immediately into memory as byte streams
 * No file paths, temporary files, or OS‑level spooling are used
 * PDF parsing operates entirely in memory and produces structured JSON
@@ -955,7 +1019,6 @@ class StatementService:
 | PARSE_003 | "Password required for encrypted PDF" | Yes |
 | PARSE_004 | "Incorrect password" | Yes |
 | PARSE_005 | "Could not extract transactions" | No |
-| PARSE_006 | "Statement already uploaded" | No |
 | MASK_001 | "Failed to mask sensitive data" | Yes |
 | MASK_002 | "PII leak detected after masking" | No |
 | DB_001 | "Database transaction failed" | Yes |
@@ -966,7 +1029,7 @@ class StatementService:
 - **Error Catalog**: 10 predefined errors with technical and user-friendly messages
 - **Atomic Transactions**: Database rollback on any failure, no partial data
 - **Card Reuse**: Automatically finds or creates card for same user+bank+last_four
-- **Duplicate Prevention**: Checks card_id + statement_month before insert
+- **Idempotent Upload (UPSERT)**: For same card_id + statement_month, update statement in place and replace transactions.
 - **Password Support**: Handles encrypted PDFs through entire pipeline
 - **Comprehensive Tests**: 13 tests covering success path, all error paths, edge cases
 
@@ -978,7 +1041,7 @@ class StatementService:
 **Completion Criteria**:
 - [x] Full 8-step workflow implemented end-to-end
 - [x] All error codes properly mapped and handled
-- [x] Duplicate detection prevents re-uploads (card_id + statement_month)
+- [x] Idempotent upload updates in place for the same (card_id + statement_month)
 - [x] Database transactions are atomic (commit/rollback)
 - [x] Only fully validated data persists
 - [x] No partial statements in database (rollback on error)
@@ -1008,7 +1071,7 @@ class StatementService:
 | GET | `/api/v1/statements` | List user's statements with pagination & filters |
 | GET | `/api/v1/statements/{id}` | Get statement details with spending summary |
 | GET | `/api/v1/statements/{id}/transactions` | **BONUS**: Paginated transactions with filters & sorting |
-| DELETE | `/api/v1/statements/{id}` | Soft delete statement + cascade to transactions |
+| DELETE | `/api/v1/statements/{id}` | Permanently delete statement + cascade to transactions |
 
 **Upload Request**:
 ```
@@ -1039,7 +1102,7 @@ password: <optional>
 - **Filtering**: By card_id, date ranges, category, merchant search
 - **Sorting**: By transaction date and amount (ascending/descending)
 - **Spending Summary**: Category breakdown and top 10 merchants
-- **Soft Delete**: Cascade delete to transactions with `deleted_at` timestamp
+- **Delete**: Permanently delete statement + cascade delete transactions
 - **Error Handling**: Error catalog with codes API_001-005
 - **Security**: All endpoints user-scoped with ownership validation
 - **Background Processing**: Placeholder for RAG embeddings
@@ -1049,7 +1112,7 @@ password: <optional>
 - [x] Rejects non-PDF files with clear error (4-step validation)
 - [x] Returns processing result within 60 seconds (synchronous)
 - [x] List/Get scoped to authenticated user only (all endpoints)
-- [x] Delete removes statement + all transactions (soft delete with cascade)
+- [x] Delete removes statement + all transactions (hard delete with cascade)
 - [x] Integration tests cover success + all error cases (23 tests, 100% passing)
 
 **Test Coverage**:
@@ -1512,7 +1575,6 @@ def parse_amount(raw: str) -> int:
 | Function | `mask_card_number` | `process_cc` |
 | Variable | `statement_month` | `sm` or `date1` |
 | Class | `StatementParser` | `Parser1` |
-| Error | `DuplicateStatementError` | `Error002` |
 | Endpoint | `/statements/upload` | `/stmt/ul` |
 
 ---

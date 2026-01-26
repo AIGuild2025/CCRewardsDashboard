@@ -78,24 +78,29 @@ class ParserFactory:
         """
         # Step 1: Extract PDF elements
         elements = self.extractor.extract(pdf_bytes, password=password)
-        print(f"[PARSER] Extracted {len(elements)} elements from PDF")
+        logger.info("Extracted elements from PDF", extra={"elements_count": len(elements)})
 
         # Step 2: Detect bank
         bank_code = self.detector.detect_from_elements(elements)
-        print(f"[PARSER] Detected bank: {bank_code or 'unknown (using GenericParser)'}")
-        print(f"[PARSER] Registered banks: {list(self._refinements.keys())}")
+        logger.info("Detected bank", extra={"bank_code": bank_code or "unknown"})
+        logger.debug("Registered banks", extra={"banks": list(self._refinements.keys())})
 
         # Step 3: Select parser
         parser_class = self._get_parser_class(bank_code)
         parser = parser_class()
         parser.bank_code = bank_code  # Set for inclusion in result
-        print(f"[PARSER] Using parser: {parser_class.__name__}")
+        logger.info("Using parser", extra={"parser": parser_class.__name__})
 
         # Step 4: Parse
         statement = parser.parse(elements)
-        print(f"[PARSER] Parsed statement: card={statement.card_last_four}, "
-              f"transactions={len(statement.transactions)}, "
-              f"month={statement.statement_month}")
+        logger.info(
+            "Parsed statement",
+            extra={
+                "transactions_count": len(statement.transactions),
+                "statement_month": statement.statement_month.isoformat(),
+                "bank_code": bank_code,
+            },
+        )
 
         return statement
 

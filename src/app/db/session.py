@@ -2,7 +2,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings
 
-async_engine = create_async_engine(settings.database_url, echo=settings.debug, future=True)
+# Do not log SQL statement parameters by default (can contain sensitive data).
+#
+# Even if someone accidentally sets DB_ECHO=true in non-dev, keep it off to avoid
+# logging queries/params in shared environments.
+async_engine = create_async_engine(
+    settings.database_url,
+    echo=(settings.db_echo if settings.app_env.lower() == "development" else False),
+    future=True,
+)
 
 AsyncSessionLocal = async_sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False

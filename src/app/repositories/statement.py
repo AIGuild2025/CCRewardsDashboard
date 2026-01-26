@@ -43,8 +43,10 @@ class StatementRepository(BaseRepository[Statement]):
         self, user_id: UUID, card_id: UUID, statement_month: date
     ) -> Statement | None:
         """
-        Check if statement already exists for a card and month.
-        Used before uploading to prevent duplicates.
+        Get the statement for a card and month (including soft-deleted rows).
+
+        Used for idempotent uploads (UPSERT): if a row exists, update it in place
+        and re-activate it if needed.
         """
         result = await self.db.execute(
             select(Statement).where(

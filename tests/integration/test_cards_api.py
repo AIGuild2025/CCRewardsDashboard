@@ -1,7 +1,6 @@
 """Integration tests for card API endpoints."""
 
 from datetime import date
-from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
@@ -162,7 +161,8 @@ class TestCardDetail:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("15000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=1500000,
                 reward_points=500,
             )
         )
@@ -171,7 +171,8 @@ class TestCardDetail:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 2, 1),
-                closing_balance=Decimal("20000.00"),
+                statement_period=date(2024, 2, 1),
+                closing_balance=2000000,
                 reward_points=750,
             )
         )
@@ -279,7 +280,8 @@ class TestCardStatements:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 1, 1),
-                closing_balance=Decimal("15000.00"),
+                statement_period=date(2024, 1, 1),
+                closing_balance=1500000,
                 reward_points=500,
             )
         )
@@ -288,7 +290,8 @@ class TestCardStatements:
                 user_id=test_user.id,
                 card_id=card.id,
                 statement_month=date(2024, 2, 1),
-                closing_balance=Decimal("20000.00"),
+                statement_period=date(2024, 2, 1),
+                closing_balance=2000000,
                 reward_points=750,
             )
         )
@@ -334,7 +337,8 @@ class TestCardStatements:
                     user_id=test_user.id,
                     card_id=card.id,
                     statement_month=date(2024, month, 1),
-                    closing_balance=Decimal("15000.00"),
+                    statement_period=date(2024, month, 1),
+                    closing_balance=1500000,
                 )
             )
         await db_session.commit()

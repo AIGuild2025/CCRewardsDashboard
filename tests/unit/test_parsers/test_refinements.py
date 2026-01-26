@@ -217,6 +217,30 @@ class TestSBIParser:
         assert closing == 4045
         assert parser._reward_points_earned == 57
 
+    def test_extract_transactions_cleans_concatenated_upi_merchants(self):
+        """If extraction interleaves two rows, keep only the first row's merchant."""
+        parser = SBIParser()
+        full_text = (
+            "24 Nov 25 UPI-T2 UNISEX SALON 24 Nov 25 UPI-RELIANCE BP MOBILITMITED 3,306.98 D"
+        )
+        txns = parser._extract_transactions([], full_text)
+        assert len(txns) == 1
+        assert txns[0].description == "UPI-T2 UNISEX SALON"
+
+    def test_extract_transactions_handles_multiple_rows_same_day(self):
+        """SBI repeats the date on every row; ensure we don't collapse rows."""
+        parser = SBIParser()
+        full_text = (
+            "16 Dec 25 UPI-DWARKAPATI FOODS LL 200.00 D "
+            "16 Dec 25 UPI-TRAVEL FOOD SERVICELHI TERMINAL 3 PV 569.85 D"
+        )
+        txns = parser._extract_transactions([], full_text)
+        assert len(txns) == 2
+        assert txns[0].description == "UPI-DWARKAPATI FOODS LL"
+        assert txns[0].amount_cents == 20000
+        assert txns[1].description == "UPI-TRAVEL FOOD SERVICELHI TERMINAL 3 PV"
+        assert txns[1].amount_cents == 56985
+
 
 class TestRefinementInheritance:
     """Test that refinements properly extend GenericParser."""

@@ -18,9 +18,22 @@ class User(BaseModel):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships
-    cards: Mapped[list["Card"]] = relationship("Card", back_populates="user", lazy="selectin")
-    statements: Mapped[list["Statement"]] = relationship("Statement", back_populates="user", lazy="selectin")
-    transactions: Mapped[list["Transaction"]] = relationship("Transaction", back_populates="user", lazy="selectin")
+    # Rely on DB-level ON DELETE CASCADE; prevent SQLAlchemy from NULLing FKs on delete.
+    cards: Mapped[list["Card"]] = relationship(
+        "Card", back_populates="user", lazy="selectin", passive_deletes="all"
+    )
+    statements: Mapped[list["Statement"]] = relationship(
+        "Statement", back_populates="user", lazy="selectin", passive_deletes="all"
+    )
+    transactions: Mapped[list["Transaction"]] = relationship(
+        "Transaction", back_populates="user", lazy="selectin", passive_deletes="all"
+    )
+    merchant_category_overrides: Mapped[list["MerchantCategoryOverride"]] = relationship(
+        "MerchantCategoryOverride",
+        back_populates="user",
+        lazy="selectin",
+        passive_deletes="all",
+    )
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, is_active={self.is_active})>"
