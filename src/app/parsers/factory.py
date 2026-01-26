@@ -89,6 +89,10 @@ class ParserFactory:
         parser_class = self._get_parser_class(bank_code)
         parser = parser_class()
         parser.bank_code = bank_code  # Set for inclusion in result
+        # Optional raw PDF context for parsers that want a deterministic fallback
+        # extraction (e.g., for bank-specific quirks). This is not persisted.
+        setattr(parser, "_pdf_bytes", pdf_bytes)
+        setattr(parser, "_pdf_password", password)
         logger.info("Using parser", extra={"parser": parser_class.__name__})
 
         # Step 4: Parse

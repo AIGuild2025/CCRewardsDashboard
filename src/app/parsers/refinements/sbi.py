@@ -4,10 +4,13 @@ Overrides card number detection and date parsing to handle SBI's formats.
 """
 
 import logging
+import io
 import re
 from datetime import date, datetime
 from itertools import permutations
 from typing import Any
+
+from pypdf import PdfReader
 
 from app.parsers.generic import GenericParser
 from app.schemas.internal import ParsedTransaction
@@ -316,7 +319,7 @@ class SBIParser(GenericParser):
             List of parsed transactions
         """
         logger.debug("Extracting transactions (SBI)")
-        transactions = []
+        transactions: list[ParsedTransaction] = []
 
         date_token = re.compile(
             r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2}",
@@ -367,83 +370,128 @@ class SBIParser(GenericParser):
             # Avoid dropping transactions due to an over-aggressive cleanup.
             return cleaned if cleaned else original
 
-        # Parse line-by-line first (most reliable for SBI; avoids cross-row mixing).
-        # Unstructured can wrap long merchants onto the next line, so we stitch
-        # continuation lines into the prior row until the next date token.
-        stitched_rows: list[str] = []
-        current: str | None = None
-        for raw_line in full_text.splitlines():
-            line = re.sub(r"\s+", " ", (raw_line or "").strip())
-            if not line:
-                continue
-            if re.match(rf"^{row_date_pat}\b", line, re.IGNORECASE):
-                if current:
-                    stitched_rows.append(current)
-                current = line
-            else:
-                if current:
-                    current = f"{current} {line}"
-        if current:
-            stitched_rows.append(current)
-
-        for row in stitched_rows:
-            try:
-                for m in row_pat.finditer(row):
-                    date_str = m.group("date")
-                    merchant = _clean_merchant_text(m.group("merchant"))
-                    amount_str = m.group("amount").replace(",", "")
-                    txn_type = m.group("cd")
-
-                    txn_date = self._parse_date(date_str)
-                    amount_cents = int(float(amount_str) * 100)
-                    transaction_type = "credit" if txn_type.upper() == "C" else "debit"
-
-                    transactions.append(
-                        ParsedTransaction(
-                            transaction_date=txn_date,
-                            description=merchant,
-                            amount_cents=amount_cents,
-                            transaction_type=transaction_type,
-                            category=None,
-                        )
-                    )
-            except Exception as e:
-                logger.debug(
-                    "Failed to parse a transaction row",
-                    extra={"error_type": type(e).__name__},
-                )
-                continue
-
-        # Last resort: if line stitching produced nothing (e.g., extractor removed
-        # newlines), fall back to the original whole-text scan but keep matches
-        # strictly bounded by row structure.
-        if not transactions:
-            pattern = re.compile(
-                rf"({row_date_pat})\s+(.+?)\s+([\d,]+\.\d{{2}})\s*([CD])\b",
-                re.IGNORECASE | re.DOTALL,
-            )
-            for match in pattern.finditer(full_text):
-                try:
-                    date_str = match.group(1)
-                    merchant = _clean_merchant_text(match.group(2))
-                    amount_str = match.group(3).replace(",", "")
-                    txn_type = match.group(4)
-
-                    txn_date = self._parse_date(date_str)
-                    amount_cents = int(float(amount_str) * 100)
-                    transaction_type = "credit" if txn_type.upper() == "C" else "debit"
-
-                    transactions.append(
-                        ParsedTransaction(
-                            transaction_date=txn_date,
-                            description=merchant,
-                            amount_cents=amount_cents,
-                            transaction_type=transaction_type,
-                            category=None,
-                        )
-                    )
-                except Exception:
+        def _parse_text_to_transactions(text: str) -> list[ParsedTransaction]:
+            # Parse line-by-line first (most reliable for SBI; avoids cross-row mixing).
+            # Unstructured can wrap long merchants onto the next line, so we stitch
+            # continuation lines into the prior row until the next date token.
+            txns: list[ParsedTransaction] = []
+            stitched_rows: list[str] = []
+            current: str | None = None
+            for raw_line in text.splitlines():
+                line = re.sub(r"\s+", " ", (raw_line or "").strip())
+                if not line:
                     continue
+                if re.match(rf"^{row_date_pat}\b", line, re.IGNORECASE):
+                    if current:
+                        stitched_rows.append(current)
+                    current = line
+                else:
+                    if current:
+                        current = f"{current} {line}"
+            if current:
+                stitched_rows.append(current)
+
+            for row in stitched_rows:
+                try:
+                    for m in row_pat.finditer(row):
+                        date_str = m.group("date")
+                        merchant = _clean_merchant_text(m.group("merchant"))
+                        amount_str = m.group("amount").replace(",", "")
+                        txn_type = m.group("cd")
+
+                        txn_date = self._parse_date(date_str)
+                        amount_cents = int(float(amount_str) * 100)
+                        transaction_type = (
+                            "credit" if txn_type.upper() == "C" else "debit"
+                        )
+
+                        txns.append(
+                            ParsedTransaction(
+                                transaction_date=txn_date,
+                                description=merchant,
+                                amount_cents=amount_cents,
+                                transaction_type=transaction_type,
+                                category=None,
+                            )
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "Failed to parse a transaction row",
+                        extra={"error_type": type(e).__name__},
+                    )
+                    continue
+
+            # Last resort: whole-text scan (handles cases where extraction removed newlines).
+            if not txns:
+                pattern = re.compile(
+                    rf"({row_date_pat})\s+(.+?)\s+([\d,]+\.\d{{2}})\s*([CD])\b",
+                    re.IGNORECASE | re.DOTALL,
+                )
+                for match in pattern.finditer(text):
+                    try:
+                        date_str = match.group(1)
+                        merchant = _clean_merchant_text(match.group(2))
+                        amount_str = match.group(3).replace(",", "")
+                        txn_type = match.group(4)
+
+                        txn_date = self._parse_date(date_str)
+                        amount_cents = int(float(amount_str) * 100)
+                        transaction_type = (
+                            "credit" if txn_type.upper() == "C" else "debit"
+                        )
+
+                        txns.append(
+                            ParsedTransaction(
+                                transaction_date=txn_date,
+                                description=merchant,
+                                amount_cents=amount_cents,
+                                transaction_type=transaction_type,
+                                category=None,
+                            )
+                        )
+                    except Exception:
+                        continue
+
+            return txns
+
+        def _looks_corrupt(txns: list[ParsedTransaction]) -> bool:
+            if not txns:
+                return True
+            amount_like = re.compile(r"^[\d,]+\.\d{2}\s*[CD]?$", re.IGNORECASE)
+            for t in txns:
+                desc = (t.description or "").strip()
+                if not desc:
+                    return True
+                if desc.lower() in {"to"}:
+                    return True
+                if amount_like.match(desc):
+                    return True
+            return False
+
+        def _extract_pdf_text_fallback() -> str | None:
+            pdf_bytes = getattr(self, "_pdf_bytes", None)
+            if not isinstance(pdf_bytes, (bytes, bytearray)) or not pdf_bytes:
+                return None
+            password = getattr(self, "_pdf_password", None)
+            try:
+                reader = PdfReader(io.BytesIO(bytes(pdf_bytes)))
+                if getattr(reader, "is_encrypted", False):
+                    reader.decrypt(password or "")
+                return "\n".join((page.extract_text() or "") for page in reader.pages)
+            except Exception:
+                return None
+
+        # Primary parse on Unstructured's extracted text.
+        transactions = _parse_text_to_transactions(full_text)
+
+        # SBI-specific deterministic fallback: if the parsed set is clearly corrupt,
+        # re-extract plain text using pypdf and parse again.
+        if _looks_corrupt(transactions):
+            fb_text = _extract_pdf_text_fallback()
+            if fb_text:
+                fb_txns = _parse_text_to_transactions(fb_text)
+                if fb_txns and not _looks_corrupt(fb_txns) and len(fb_txns) >= len(transactions):
+                    transactions = fb_txns
 
         logger.info("Extracted transactions", extra={"transactions_count": len(transactions)})
         return (
