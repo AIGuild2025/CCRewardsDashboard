@@ -1,68 +1,45 @@
 # Secure Credit Card Statement Ingestion & Analysis Architecture
 
-## 0. Alignment Checklist (TODO)
+**Document Version**: 2.0  
+**Last Updated**: January 27, 2026  
+**Current Phase**: Phase 11 Completed  
+**Total Tests**: 296 passing
 
-Use this section to track whether the implementation matches the goals in this document. Check items off only when verified in code + tests.
+---
 
-### 0.1 Current Decisions (Confirmed)
+## 0. Implementation Status
 
-- [x] Duplicate definition: "same statement" = same month statement for a particular bank + card (per user).
-- [x] Duplicate handling: upload should be idempotent and update-in-place (return same `statement_id`) rather than rejecting.
+### 0.1 Core Requirements
 
-### 0.2 Gaps To Close (Ordered)
+- [x] **Zero Persistence**: No raw PDFs stored on disk or database
+- [x] **In-Memory Processing**: PDF bytes processed with size limit (25MB)
+- [x] **PII Masking**: All sensitive data masked before persistence
+- [x] **User Isolation**: All data scoped to authenticated user
+- [x] **Duplicate Handling**: Idempotent upsert for statements
+- [x] **Soft Delete**: Re-upload after delete supported
+- [x] **Secure Logging**: No PII in logs or debug output
 
-#### A) Ingestion Model (Section 4.1)
+### 0.2 Feature Completeness
 
-- [x] Guarantee **no OS-level spooling / temp files** during upload by accepting raw PDF bytes (no multipart parser / `UploadFile`).
-- [x] Enforce "in-memory only" PDF bytes end-to-end with a streaming size cap (`PDF_MAX_SIZE_MB`, default 25MB).
+#### ✅ Completed Features
+- User authentication (JWT, bcrypt)
+- Statement upload & parsing (PDF to structured data)
+- Multi-bank support (HDFC, Amex, SBI + generic parser)
+- PII masking pipeline (Microsoft Presidio)
+- Transaction categorization (rule-based + user overrides)
+- Category override system with backfill
+- Cards & transactions API
+- Error handling & structured logging
+- Reward points tracking (dual: earned + balance)
 
-#### B) Persistence Boundary (Section 4.3)
+#### 🔄 Future Enhancements
+- [ ] Refine categorization rules with real patterns
+- [ ] RAG service for card benefits Q&A
+- [ ] Spending trends and insights
+- [ ] Budget tracking and alerts
+- [ ] Mobile app support
 
-- [x] Ensure **no unmasked PII crosses the persistence boundary** (fix PII leak validation so it actually blocks persistence).
-- [x] Ensure logs never contain raw statement text / unmasked identifiers (see Section 8 assumptions).
-
-#### C) Database Schema Alignment (Section 6)
-
-- [x] Align `statements` to be the authoritative record with a `masked_content` (masked JSON payload) column as described in Section 6.1.
-- [x] Add/align `document_type`, `source_bank`, `statement_period`, `ingestion_status` fields per Section 6.1.
-- [x] Reconcile ownership model naming: doc uses `owner_user_id`; implementation uses `user_id` (same semantics; `user_id` is the owner).
-
-#### D) Duplicate + Delete Semantics (Linked to Sections 5 + 6)
-
-- [x] Implement idempotent **UPSERT** for `(user_id, bank_code, card_last_four, statement_month)`:
-  - Update statement fields in place
-  - Replace transactions for that statement (delete + insert)
-  - Return the same `statement_id`
-- [x] Fix soft-delete conflict: re-upload after delete must work (unique constraints must ignore `deleted_at` or re-activate the row).
-
-#### E) Logging / Operational Safety (Section 8 assumptions)
-
-- [x] Remove/guard debug prints of extracted PDF text and other sensitive content.
-- [x] Default DB SQL echo to off in non-dev environments; confirm no sensitive values are logged.
-
-#### F) Tests / Verification
-
-- [x] Add tests that prove: (1) no raw PDFs persist, (2) no PII leaks persist, (3) upsert semantics work, (4) delete + re-upload works.
-
-#### G) Transaction Categorization (Rewards/LLM Input)
-
-- [x] Add deterministic, rule-based categorization for banks that don't provide categories (e.g., SBI), so dashboard/LLM has usable spend buckets.
-- [ ] Refine categorization rules over time using real statement patterns (UPI/transfer heuristics, ambiguous merchants, etc.).
-- [x] Add a user-override mechanism (merchant -> category) so users can correct mistakes and future ingestions stay consistent.
-  - Phase 1 (Schema Foundations)
-    - [x] Add `transactions.merchant_key` (normalized merchant) + index for fast lookups/rollups (keep `transactions.merchant` unchanged).
-    - [x] Add `merchant_category_overrides` table keyed by `(user_id, merchant_key)` with `category` and timestamps.
-  - Phase 2 (Ingestion Integration)
-    - [x] During ingestion: populate `transactions.merchant_key` and apply override-first categorization (override -> parser category -> rules fallback).
-  - Phase 3 (User API)
-    - [x] Add endpoint to set override via `transaction_id` (debit-only) with taxonomy validation.
-    - [x] On override set: backfill existing matching debit transactions (update `transactions.category`) for immediate trend correctness.
-  - Phase 4 (Read/UX Support)
-    - [x] Add endpoint to list overrides (pagination + search by merchant_key).
-    - [x] Add endpoint to delete an override and optionally recompute affected transactions via rules fallback.
-  - Phase 5 (Tests/Verification)
-    - [x] Unit tests for normalization + override precedence.
-    - [x] Integration tests: override set updates existing rows and affects spend summary/top merchants outputs.
+---
 
 ## 1. Overview
 
@@ -831,68 +808,6 @@ r'\#{4}[\s-]\#{4}[\s-]\#{4}[\s-]\d{4}',
 - [x] All 193 tests passing
 
 **Completed**: January 24, 2026
-
----
-
-### Phase 7: Bank-Specific Refinements ⏳ **TODO**
-```python
-class BankDetector:
-    BANK_PATTERNS = {
-        "hdfc": ["HDFC Bank", "hdfcbank.com"],
-        "icici": ["ICICI Bank", "icicibank.com"],
-        "sbi": ["State Bank of India", "SBI Card"],
-        "amex": ["American Express", "americanexpress.com"],
-        "citi": ["Citibank", "citi.com"],
-        "chase": ["JPMorgan Chase", "chase.com"],
-    }
-    
-    def detect(self, text: str) -> str | None:
-        """Return bank_code or None if unknown."""
-```
-
-**GenericParser** (handles all banks):
-```python
-class GenericParser:
-    """Extracts common patterns from any credit card statement."""
-    
-    def parse(self, elements: list[Element]) -> ParsedStatement:
-        return ParsedStatement(
-            card_last_four=self._find_card_number(elements),
-            statement_month=self._find_statement_period(elements),
-            transactions=self._extract_transactions(elements),
-            closing_balance=self._find_balance(elements),
-            reward_points=self._find_rewards(elements),
-        )
-    
-    # Override these in refinements if needed:
-    def _parse_date(self, text: str) -> date: ...
-    def _parse_amount(self, text: str) -> int: ...
-    def _find_rewards(self, elements) -> int: ...
-```
-
-**Factory Logic**:
-```python
-class ParserFactory:
-    REFINEMENTS = {
-        "hdfc": HDFCParser,
-        "amex": AmexParser,
-        # Others use GenericParser directly
-    }
-    
-    def parse(self, pdf_bytes: bytes) -> ParsedStatement:
-        elements = self.extractor.extract(pdf_bytes)
-        bank_code = self.detector.detect(full_text)
-        parser = self.REFINEMENTS.get(bank_code, GenericParser)()
-        return parser.parse(elements)
-```
-
-**Completion Criteria**:
-- [ ] Unstructured.io extracts text/tables from PDF bytes (in-memory)
-- [ ] BankDetector correctly identifies all 6 supported banks
-- [ ] GenericParser extracts card, period, transactions, balance from any statement
-- [ ] Unknown bank uses GenericParser (graceful fallback)
-- [ ] No temporary files created
-- [ ] Tests use mock Unstructured responses
 
 ---
 
