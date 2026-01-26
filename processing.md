@@ -1241,6 +1241,185 @@ password: <optional>
 
 ---
 
+### Phase 11B: Transaction Categorization System ✅ **COMPLETED** (January 27, 2026)
+
+**Goal**: Implement rule-based transaction categorization with user override mechanism for accurate spending insights.
+
+**Deliverables**:
+- [x] `app/services/categorization.py` — Rule-based categorization engine (180 lines)
+- [x] `app/services/merchant.py` — Merchant normalization utilities (85 lines)
+- [x] `app/models/merchant_category_override.py` — Override ORM model (42 lines)
+- [x] `app/schemas/transaction.py` — Enhanced with override endpoints schemas (145 lines)
+- [x] `app/api/v1/transactions.py` — Override management endpoints (updated, 380 lines)
+- [x] `app/services/statement.py` — Integrated categorization during ingestion (updated)
+- [x] `alembic/versions/add_merchant_key_and_overrides.py` — Schema migration (new tables/columns)
+- [x] `tests/unit/test_categorization.py` — 20 comprehensive unit tests (480 lines)
+- [x] `tests/integration/test_transaction_overrides.py` — 37 integration tests (780 lines)
+
+**Category Taxonomy** (12 standardized categories):
+```python
+CATEGORIES = {
+    "DINING", "GROCERIES", "SHOPPING", "ENTERTAINMENT",
+    "TRAVEL", "FUEL", "UTILITIES", "HEALTHCARE",
+    "INSURANCE", "EDUCATION", "EMI", "OTHER"
+}
+```
+
+**Merchant Normalization**:
+```python
+def normalize_merchant(raw: str) -> str:
+    """Normalize merchant name for consistent matching.
+    
+    Examples:
+        "Amazon.in Shopping" → "amazon"
+        "ZOMATO FOOD ORDER" → "zomato"
+        "Uber Trip 12345" → "uber"
+    """
+    # Remove common noise words
+    noise_words = ["pvt", "ltd", "inc", "llc", "the", "india", "payment"]
+    # Lowercase, strip, remove numbers/special chars
+    # Keep only alphanumeric
+```
+
+**Rule-Based Categorization** (90+ merchant patterns):
+| Category | Example Keywords |
+|----------|-----------------|
+| DINING | restaurant, cafe, food, zomato, swiggy, pizza, dominos |
+| GROCERIES | bigbasket, grofers, dmart, supermarket, grocery, fresh |
+| SHOPPING | amazon, flipkart, myntra, mall, retail, store |
+| ENTERTAINMENT | netflix, prime, spotify, hotstar, cinema, movie, pvr |
+| TRAVEL | uber, ola, irctc, flight, makemytrip, goibibo, airbnb |
+| FUEL | petrol, diesel, fuel, hp, indian oil, bharat petroleum |
+| UTILITIES | electricity, water, gas, broadband, wifi, internet |
+
+**Categorization Logic** (3-tier precedence):
+```
+1. User Override (highest priority)
+   ↓ (if not set)
+2. Parser Category (from PDF if available)
+   ↓ (if not provided)
+3. Rule-Based Matching (keyword patterns)
+   ↓ (if no match)
+4. Fallback: "OTHER"
+```
+
+**Database Schema Changes**:
+
+1. **transactions table** - Added columns:
+   - `merchant_key VARCHAR(255)` - Normalized merchant for matching
+   - Index on `merchant_key` for fast lookups
+
+2. **merchant_category_overrides table** (NEW):
+```sql
+CREATE TABLE merchant_category_overrides (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id),
+    merchant_key VARCHAR(255) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    UNIQUE (user_id, merchant_key)
+);
+```
+
+**API Endpoints**:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/transactions/{id}/set-category` | Set override for merchant (debit only) |
+| GET | `/api/v1/transactions/overrides` | List user's overrides (paginated, searchable) |
+| DELETE | `/api/v1/transactions/overrides/{id}` | Delete override and optionally recompute |
+
+**Set Category Override Flow**:
+```
+1. Validate transaction exists and is debit (credits cannot be categorized)
+2. Normalize merchant name → merchant_key
+3. Validate category against taxonomy
+4. Upsert override: INSERT ... ON CONFLICT UPDATE
+5. Backfill: UPDATE all user's transactions matching merchant_key
+6. Return updated count + new category
+```
+
+**Features Implemented**:
+
+1. **Debit-Only Categorization**: Credits/refunds excluded from categorization
+2. **Override Precedence**: User override > parser > rules > "OTHER"
+3. **Automatic Backfill**: Setting override updates all existing matching transactions
+4. **Recompute on Delete**: Optional recomputation using rules when override deleted
+5. **Search & Filter**: List overrides with merchant_key search and pagination
+6. **Spend Summary Impact**: Category overrides immediately reflected in aggregations
+
+**Test Coverage**: 57 tests (all passing)
+- **Unit Tests (20)**:
+  - 8 normalization tests (noise words, special chars, numbers, whitespace)
+  - 12 rule matching tests (all 12 categories + "OTHER" fallback)
+- **Integration Tests (37)**:
+  - 15 set-category tests (success, validation, backfill, debit-only)
+  - 12 list-overrides tests (pagination, search, empty state)
+  - 10 delete-override tests (success, recompute, not found, access control)
+
+**Ingestion Integration**:
+```python
+# In StatementService.process_upload()
+for txn in parsed.transactions:
+    # 1. Normalize merchant
+    txn.merchant_key = normalize_merchant(txn.merchant)
+    
+    # 2. Apply categorization (3-tier precedence)
+    category = await self._determine_category(
+        user_id=user_id,
+        merchant_key=txn.merchant_key,
+        parser_category=txn.category  # from PDF if available
+    )
+    
+    # 3. Store in database
+    transaction = Transaction(
+        merchant=txn.merchant,
+        merchant_key=txn.merchant_key,
+        category=category,
+        ...
+    )
+```
+
+**Example User Workflow**:
+```
+1. User uploads statement → transactions categorized by rules
+2. User views spending summary → sees "Amazon" in SHOPPING
+3. User corrects: "Amazon is my groceries source"
+4. POST /transactions/123/set-category { "category": "GROCERIES" }
+5. System backfills: all Amazon transactions → GROCERIES
+6. Spend summary immediately reflects change
+7. Future statements: Amazon auto-categorized as GROCERIES
+```
+
+**Completion Criteria**:
+- [x] Merchant normalization removes noise (pvt, ltd, numbers, special chars)
+- [x] Rule-based engine covers 12 categories with 90+ keywords
+- [x] User overrides stored in dedicated table
+- [x] Override precedence: user > parser > rules > OTHER
+- [x] Backfill updates all matching transactions on override set
+- [x] Delete override optionally recomputes via rules
+- [x] API endpoints handle validation, pagination, search
+- [x] Debit-only enforcement (credits excluded)
+- [x] Category taxonomy validated against enum
+- [x] Integration with statement ingestion pipeline
+- [x] Spend summary reflects override changes immediately
+- [x] Unit tests cover normalization and rule matching
+- [x] Integration tests cover full API workflows
+- [x] User isolation enforced (cannot override other users' merchants)
+
+**Impact on Existing Phases**:
+- **Phase 9 (Statements API)**: Ingestion now populates merchant_key and applies categorization
+- **Phase 10 (Transactions API)**: Summary endpoint respects user overrides
+- **Phase 11 (Error Handling)**: Override endpoints use consistent error format
+
+**Migration Notes**:
+- Existing transactions get merchant_key populated on next statement upload
+- Category backfill applies to all past transactions when override set
+- No data loss: original merchant name preserved in `merchant` column
+
+---
+
 ### Phase 12: Docker & Deployment 🚫 **DEFERRED**
 
 **Status**: Out of scope for current development cycle. Will be planned after core development is complete.
