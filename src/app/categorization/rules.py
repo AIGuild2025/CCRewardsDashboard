@@ -22,6 +22,7 @@ CATEGORIES: set[str] = {
     "food",
     "shopping",
     "personal_care",
+    "education",
     "fuel",
     "travel",
     "utilities",
@@ -53,9 +54,10 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
     ("fees", re.compile(r"\bFEE\b|\bCHARGE\b|\bSURCHARGE\b|\bGST\b|\bTAX\b|\bLATE\b|\bANNUAL\b|\bWAIVER\b")),
 
     # Merchant/vertical hints
-    ("fuel", re.compile(r"\bFUEL(?:S)?\b|\bPETROL\b|\bDIESEL\b|\bSHELL\b|\bHPCL\b|\bIOCL\b|\bBPCL\b")),
+    ("fuel", re.compile(r"\bFUEL(?:S)?\b|\bPETROL\b|\bDIESEL\b|\bSHELL\b|\bHPCL\b|\bIOCL\b|\bBPCL\b|\bRELIANCE\s+BP\b|\bBP\s+MOBIL\w*\b|\bSERVICE\s+STN\b|\bSERVICE\s+STATION\b")),
     ("health", re.compile(r"\bPHARM\b|\bPHARMACY\b|\bHOSP\b|\bHOSPITAL\b|\bCLINIC\b|\bMED\b|\bAPOLLO\b")),
     ("personal_care", re.compile(r"\bSALON\b|\bBARBER\b|\bPARLOUR\b|\bPARLOR\b")),
+    ("education", re.compile(r"\bUDEMY\b|\bCOURSERA\b|\bUDEMIC\b|\bTRAINING\b|\bTUITION\b|\bEDU\b")),
     # Common large merchants (keep narrow; user overrides can still take precedence).
     ("travel", re.compile(r"CLEARTRIP")),
     ("shopping", re.compile(r"RELIANCE\s*RETAIL(?:\s*(?:LTD|LIMITED))?")),

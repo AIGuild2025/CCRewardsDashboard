@@ -327,11 +327,11 @@ class SBIParser(GenericParser):
         )
         row_date_pat = r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2}"
         # Row match that can find multiple transactions inside one stitched line.
-        # The lookahead ensures we stop at the next row's date token (or end).
+        # We do not require an immediate next-date lookahead because some extractors
+        # can insert header text between rows (e.g., "TRANSACTIONS FOR ...").
         row_pat = re.compile(
             rf"(?P<date>{row_date_pat})\s+(?P<merchant>.+?)\s+"
-            rf"(?P<amount>[\d,]+\.\d{{2}})\s*(?P<cd>[CD])"
-            rf"(?=\s*{row_date_pat}|\s*$)",
+            rf"(?P<amount>[\d,]+\.\d{{2}})\s*(?P<cd>[CD])\b",
             re.IGNORECASE | re.DOTALL,
         )
 
@@ -469,6 +469,9 @@ class SBIParser(GenericParser):
             return False
 
         def _extract_pdf_text_fallback() -> str | None:
+            override = getattr(self, "_pdf_text_override", None)
+            if isinstance(override, str) and override.strip():
+                return override
             pdf_bytes = getattr(self, "_pdf_bytes", None)
             if not isinstance(pdf_bytes, (bytes, bytearray)) or not pdf_bytes:
                 return None
@@ -484,13 +487,15 @@ class SBIParser(GenericParser):
         # Primary parse on Unstructured's extracted text.
         transactions = _parse_text_to_transactions(full_text)
 
-        # SBI-specific deterministic fallback: if the parsed set is clearly corrupt,
-        # re-extract plain text using pypdf and parse again.
-        if _looks_corrupt(transactions):
-            fb_text = _extract_pdf_text_fallback()
-            if fb_text:
-                fb_txns = _parse_text_to_transactions(fb_text)
-                if fb_txns and not _looks_corrupt(fb_txns) and len(fb_txns) >= len(transactions):
+        # SBI-specific deterministic fallback: also try plain text extraction using pypdf.
+        # Prefer it if:
+        # - the current parse is corrupt, OR
+        # - it yields strictly more transactions (common when Unstructured drops rows).
+        fb_text = _extract_pdf_text_fallback()
+        if fb_text:
+            fb_txns = _parse_text_to_transactions(fb_text)
+            if fb_txns and not _looks_corrupt(fb_txns):
+                if _looks_corrupt(transactions) or len(fb_txns) > len(transactions):
                     transactions = fb_txns
 
         logger.info("Extracted transactions", extra={"transactions_count": len(transactions)})

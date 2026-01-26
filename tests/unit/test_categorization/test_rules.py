@@ -25,8 +25,17 @@ def test_categorize_reliance_retail_shopping() -> None:
 def test_categorize_fuels_to_fuel() -> None:
     assert categorize("UPI-B2 FUELS", transaction_type="debit") == "fuel"
 
+def test_categorize_reliance_bp_mobility_to_fuel() -> None:
+    assert categorize("UPI-RELIANCE BP MOBILITMITED", transaction_type="debit") == "fuel"
+
+def test_categorize_service_stn_to_fuel() -> None:
+    assert categorize("UPI-Satyanam Service Stn", transaction_type="debit") == "fuel"
+
 def test_categorize_bakery_to_food() -> None:
     assert categorize("UPI-KALKATIA BAKERY", transaction_type="debit") == "food"
+
+def test_categorize_udemy_to_education() -> None:
+    assert categorize("UPI-Udemy India LLP", transaction_type="debit") == "education"
 
 def test_categorize_personal_care_salon() -> None:
     assert (
