@@ -1523,37 +1523,41 @@ RUN python -m spacy download en_core_web_sm
 ### Authentication
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/v1/auth/register` | No | Create account |
-| POST | `/api/v1/auth/login` | No | Get tokens |
-| POST | `/api/v1/auth/refresh` | No | Refresh token |
-| GET | `/api/v1/auth/me` | Yes | Current user |
+| POST | `/api/v1/auth/register` | No | Create user account |
+| POST | `/api/v1/auth/login` | No | Get access + refresh tokens |
+| POST | `/api/v1/auth/refresh` | No | Refresh access token |
+| GET | `/api/v1/auth/me` | Yes | Get current user info |
 
 ### Statements
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/v1/statements/upload` | Yes | Upload PDF |
-| GET | `/api/v1/statements` | Yes | List statements |
-| GET | `/api/v1/statements/{id}` | Yes | Get statement |
-| DELETE | `/api/v1/statements/{id}` | Yes | Delete statement |
+| POST | `/api/v1/statements/upload` | Yes | Upload PDF statement |
+| GET | `/api/v1/statements` | Yes | List statements (paginated) |
+| GET | `/api/v1/statements/{id}` | Yes | Get statement with transactions |
+| GET | `/api/v1/statements/summary` | Yes | Aggregate spending summary |
+| DELETE | `/api/v1/statements/{id}` | Yes | Soft delete statement |
 
 ### Cards
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/v1/cards` | Yes | List cards |
-| GET | `/api/v1/cards/{id}` | Yes | Get card |
-| GET | `/api/v1/cards/{id}/statements` | Yes | Card's statements |
+| GET | `/api/v1/cards` | Yes | List user's cards |
+| GET | `/api/v1/cards/{id}` | Yes | Get card details with stats |
+| GET | `/api/v1/cards/{id}/statements` | Yes | Get card's statements |
 
 ### Transactions
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/v1/transactions` | Yes | List with filters |
-| GET | `/api/v1/transactions/summary` | Yes | Category summary |
+| GET | `/api/v1/transactions` | Yes | List with filters (date, category, merchant) |
+| GET | `/api/v1/transactions/summary` | Yes | Category-wise spending summary |
+| POST | `/api/v1/transactions/{id}/set-category` | Yes | Set category override for merchant |
+| GET | `/api/v1/transactions/overrides` | Yes | List user's category overrides |
+| DELETE | `/api/v1/transactions/overrides/{id}` | Yes | Delete category override |
 
-### Utility
+### Health
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/health` | No | Basic health |
-| GET | `/health/ready` | No | Readiness check |
+| GET | `/health` | No | Basic health check |
+| GET | `/health/ready` | No | Readiness check with DB (503 if unavailable) |
 
 ---
 
