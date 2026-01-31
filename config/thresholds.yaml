@@ -1,0 +1,48 @@
+# Confidence & Alert Thresholds
+#
+# Used to determine when rule-based extraction is insufficient
+# and we should fall back to heuristic or LLM parsing.
+
+thresholds:
+  # Extraction Confidence Levels
+  extraction:
+    rule_based_success: 0.85  # Confidence threshold for rule-based (if below, try heuristic)
+    heuristic_success: 0.70   # Confidence threshold for heuristic (if below, try LLM)
+    llm_fallback: 0.90        # Assumed confidence when LLM is used
+
+  # Data Quality Metrics
+  data_quality:
+    min_required_fields: 0.60  # At least 60% of expected fields must be present
+    null_value_alert: 0.20     # Alert if >20% of a field are null
+    unexpected_type_alert: true
+
+  # Change Detection
+  dom_change:
+    fingerprint_check_interval: 3600  # Check every hour
+    min_diff_percentage: 0.05  # Alert if >5% of DOM differs
+
+  # Monitoring Alerts
+  alerts:
+    extraction_failure_rate: 0.10  # Alert if >10% of extractions fail
+    timeout_rate: 0.05              # Alert if >5% timeout
+    llm_usage_spike: 0.50           # Alert if LLM usage > 50% (unusual)
+
+  # Retry & Backoff
+  retry:
+    max_retries: 3
+    backoff_factor: 2.0
+    initial_delay: 5
+
+# Severity Levels for Alerts
+severity:
+  critical:
+    - extraction_failure_rate
+    - timeout_rate
+    - database_connection_error
+  warning:
+    - llm_usage_spike
+    - null_value_alert
+    - unexpected_type_alert
+  info:
+    - dom_change
+    - successful_extraction
