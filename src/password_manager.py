@@ -30,7 +30,14 @@ class PasswordManager:
     
     def _load_or_create_key(self):
         """Load existing encryption key or create new one"""
-        if self.key_path.exists():
+        # Try to read from environment variable first (for cloud deployment)
+        env_key = os.getenv('ENCRYPTION_KEY')
+        if env_key:
+            import base64
+            # Decode base64-encoded key from environment
+            key = base64.b64decode(env_key)
+            print(f"[OK] Loaded encryption key from ENCRYPTION_KEY environment variable")
+        elif self.key_path.exists():
             with open(self.key_path, 'rb') as f:
                 key = f.read()
         else:
