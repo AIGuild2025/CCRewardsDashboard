@@ -1,0 +1,329 @@
+{
+	"info": {
+		"_postman_id": "cc-rewards-dashboard-render-001",
+		"name": "CC Rewards Dashboard API - Render Production",
+		"description": "Credit Card Statement Parser API - Production deployment on Render.com",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{auth_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/health",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"health"
+					]
+				},
+				"description": "Check if the API server is running. No authentication required."
+			},
+			"response": []
+		},
+		{
+			"name": "Parse PDF (Fast - No Validation)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Credit card statement PDF file"
+						},
+						{
+							"key": "password",
+							"value": "",
+							"type": "text",
+							"description": "PDF password (optional, leave empty if using password manager)"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/parse-pdf",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"parse-pdf"
+					]
+				},
+				"description": "Upload and parse PDF with single LLM model (fast, ~3 seconds). Use this for production. Returns categorized transactions with rewards calculation. Note: First request after cold start may take 30-60 seconds."
+			},
+			"response": []
+		},
+		{
+			"name": "Parse PDF (With Validation)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": [],
+							"description": "Credit card statement PDF file"
+						},
+						{
+							"key": "password",
+							"value": "",
+							"type": "text",
+							"description": "PDF password (optional, leave empty if using password manager)"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/parse-pdf?validate=true",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"parse-pdf"
+					],
+					"query": [
+						{
+							"key": "validate",
+							"value": "true",
+							"description": "Enable dual-model validation for accuracy check"
+						}
+					]
+				},
+				"description": "Upload and parse PDF with dual LLM validation (slower, ~6 seconds). Uses two models to cross-validate categorization accuracy. Returns additional model_info with accuracy metrics."
+			},
+			"response": []
+		},
+		{
+			"name": "Get All Transactions",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/transactions",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions"
+					]
+				},
+				"description": "Get the full transaction summary including all categories with transaction arrays and totals. Returns detailed data with all transactions."
+			},
+			"response": []
+		},
+		{
+			"name": "Get All Categories",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/categories",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"categories"
+					]
+				},
+				"description": "Get a lightweight list of all transaction categories with their totals (without transaction arrays). 50-70% smaller payload than /transactions endpoint."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Category Details - Groceries",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/categories/Groceries",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"categories",
+						"Groceries"
+					]
+				},
+				"description": "Get detailed transactions for a specific category (e.g., Groceries)"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Category Details - Dining",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/categories/Dining",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"categories",
+						"Dining"
+					]
+				},
+				"description": "Get detailed transactions for Dining category"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Category Details - Fuel",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/categories/Fuel",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"categories",
+						"Fuel"
+					]
+				},
+				"description": "Get detailed transactions for Fuel category"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Category Details - Shopping",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/categories/Shopping",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"categories",
+						"Shopping"
+					]
+				},
+				"description": "Get detailed transactions for Shopping category"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Category Details - Utilities",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/categories/Utilities",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"categories",
+						"Utilities"
+					]
+				},
+				"description": "Get detailed transactions for Utilities category"
+			},
+			"response": []
+		},
+		{
+			"name": "Authentication Error Test",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "invalid_token_123",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/api/v1/transactions",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions"
+					]
+				},
+				"description": "Test authentication failure with invalid token (should return 401)"
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://cc-rewards-transaction-parser-api.onrender.com",
+			"type": "string"
+		},
+		{
+			"key": "auth_token",
+			"value": "cc_user1_token_2026",
+			"type": "string"
+		}
+	]
+}
