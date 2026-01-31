@@ -1,0 +1,297 @@
+{
+  "info": {
+    "_postman_id": "9f9e9d7a-0d66-4fb4-9b1b-4e4cfcd4d2b2",
+    "name": "CCRewardsDashboard API",
+    "description": "Postman collection for CCRewardsDashboard (FastAPI) endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "Health Ready",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health/ready"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\",\n  \"full_name\": \"Example User\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/register"
+          }
+        },
+        {
+          "name": "Login (Sets Tokens)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.environment.set('accessToken', data.access_token);",
+                  "pm.environment.set('refreshToken', data.refresh_token);",
+                  "pm.environment.set('tokenType', data.token_type || 'bearer');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "Refresh (Sets Tokens)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.environment.set('accessToken', data.access_token);",
+                  "pm.environment.set('refreshToken', data.refresh_token);",
+                  "pm.environment.set('tokenType', data.token_type || 'bearer');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/refresh"
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Statements",
+      "item": [
+        {
+          "name": "Upload Statement (PDF Raw Body) (Sets statementId, cardId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  pm.environment.set('statementId', data.statement_id);",
+                  "  pm.environment.set('cardId', data.card_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/pdf" },
+              { "key": "X-PDF-Password", "value": "{{pdfPassword}}", "disabled": true }
+            ],
+            "body": {
+              "mode": "file",
+              "file": { "src": "{{pdfPath}}" }
+            },
+            "url": "{{baseUrl}}/api/v1/statements/upload"
+          }
+        },
+        {
+          "name": "List Statements",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/statements?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Get Statement Detail (With Summary)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/statements/{{statementId}}"
+          }
+        },
+        {
+          "name": "List Statement Transactions (Sets transactionId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (data.transactions && data.transactions.length) {",
+                  "    pm.environment.set('transactionId', data.transactions[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/statements/{{statementId}}/transactions?page=1&limit=50"
+          }
+        },
+        {
+          "name": "Delete Statement",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/statements/{{statementId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cards",
+      "item": [
+        {
+          "name": "List Cards",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/cards"
+          }
+        },
+        {
+          "name": "Get Card Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/cards/{{cardId}}"
+          }
+        },
+        {
+          "name": "Get Card Statements",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/cards/{{cardId}}/statements?page=1&limit=20"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        {
+          "name": "List Transactions",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/transactions?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Spending Summary (By Category)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/transactions/summary"
+          }
+        },
+        {
+          "name": "Set Category Override (By Transaction)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"utilities\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/transactions/{{transactionId}}/category"
+          }
+        },
+        {
+          "name": "List Category Overrides (Sets overrideId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (data.overrides && data.overrides.length) {",
+                  "    pm.environment.set('overrideId', data.overrides[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/transactions/category-overrides?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Delete Category Override (Recompute)",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/v1/transactions/category-overrides/{{overrideId}}?recompute=true"
+          }
+        }
+      ]
+    }
+  ]
+}
+
