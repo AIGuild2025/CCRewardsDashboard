@@ -122,6 +122,28 @@ class StatementService:
                 transactions_count=transactions_count,
                 reward_points=parsed_statement.reward_points,
                 reward_points_earned=parsed_statement.reward_points_earned,
+                rewards_summary=(
+                    {
+                        "previous_balance": parsed_statement.reward_points_previous,
+                        "earned": parsed_statement.reward_points_earned,
+                        "redeemed": parsed_statement.reward_points_redeemed,
+                        "closing_balance": parsed_statement.reward_points,
+                    }
+                    if parsed_statement.reward_points_previous is not None
+                    or parsed_statement.reward_points_redeemed is not None
+                    else None
+                ),
+                account_summary=(
+                    {
+                        "previous_balance": parsed_statement.account_summary.previous_balance_cents,
+                        "credits": parsed_statement.account_summary.credits_cents,
+                        "debits": parsed_statement.account_summary.debits_cents,
+                        "fees": parsed_statement.account_summary.fees_cents,
+                        "total_outstanding": parsed_statement.account_summary.total_outstanding_cents,
+                    }
+                    if parsed_statement.account_summary is not None
+                    else None
+                ),
                 processing_time_ms=processing_time_ms,
             )
 
@@ -359,6 +381,23 @@ class StatementService:
 
             def build_masked_content() -> dict[str, Any]:
                 # Authoritative masked payload stored on the statement record.
+                rewards_summary = None
+                if parsed.reward_points_previous is not None or parsed.reward_points_redeemed is not None:
+                    rewards_summary = {
+                        "previous_balance": parsed.reward_points_previous,
+                        "earned": parsed.reward_points_earned,
+                        "redeemed": parsed.reward_points_redeemed,
+                        "closing_balance": parsed.reward_points,
+                    }
+                account_summary = None
+                if parsed.account_summary is not None:
+                    account_summary = {
+                        "previous_balance": parsed.account_summary.previous_balance_cents,
+                        "credits": parsed.account_summary.credits_cents,
+                        "debits": parsed.account_summary.debits_cents,
+                        "fees": parsed.account_summary.fees_cents,
+                        "total_outstanding": parsed.account_summary.total_outstanding_cents,
+                    }
                 return {
                     "bank_code": parsed.bank_code,
                     "card_last_four": parsed.card_last_four[-4:],
@@ -367,6 +406,8 @@ class StatementService:
                     "closing_balance_cents": parsed.closing_balance_cents,
                     "reward_points": parsed.reward_points,
                     "reward_points_earned": parsed.reward_points_earned,
+                    "rewards_summary": rewards_summary,
+                    "account_summary": account_summary,
                     "metadata": {
                         "statement_date": parsed.statement_date.isoformat()
                         if parsed.statement_date

@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,8 +14,18 @@ from app.models.card import Card
 from app.models.statement import Statement
 from app.models.user import User
 from app.repositories.card import CardRepository
-from app.schemas.card import CardDetailResponse, CardListResult, CardResponse
-from app.schemas.statement import MoneyMeta, PaginationMeta, StatementListResponse, StatementListResult
+from app.schemas.card import (
+    CardDetailResponse,
+    CardListResult,
+    CardResponse,
+    CardUpdateRequest,
+)
+from app.schemas.statement import (
+    MoneyMeta,
+    PaginationMeta,
+    StatementListResponse,
+    StatementListResult,
+)
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -35,6 +45,10 @@ router = APIRouter(prefix="/cards", tags=["cards"])
     """,
 )
 async def list_cards(
+    active_only: bool = Query(
+        False,
+        description="When true, return only active cards.",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CardListResult:
@@ -49,7 +63,11 @@ async def list_cards(
         List of cards with total count
     """
     repo = CardRepository(db)
-    cards = await repo.get_all_by_user(current_user.id)
+    cards = (
+        await repo.get_active_cards_by_user(current_user.id)
+        if active_only
+        else await repo.get_all_by_user(current_user.id)
+    )
 
     return CardListResult(
         cards=[CardResponse.model_validate(card) for card in cards],
@@ -120,17 +138,29 @@ async def get_card_detail(
         )
 
     # Calculate statistics
-    stmt_query = select(
+    stats_query = select(
         func.count(Statement.id).label("statements_count"),
-        func.sum(Statement.reward_points).label("total_reward_points"),
+        func.sum(Statement.reward_points_earned).label("total_reward_points_earned"),
         func.max(Statement.created_at).label("latest_statement_date"),
     ).where(
         Statement.card_id == card_id,
         Statement.deleted_at.is_(None),
     )
 
-    result = await db.execute(stmt_query)
-    stats = result.one()
+    stats_result = await db.execute(stats_query)
+    stats = stats_result.one()
+
+    latest_points_query = (
+        select(Statement.reward_points)
+        .where(
+            Statement.card_id == card_id,
+            Statement.deleted_at.is_(None),
+        )
+        .order_by(Statement.statement_month.desc(), Statement.created_at.desc())
+        .limit(1)
+    )
+    latest_points_result = await db.execute(latest_points_query)
+    latest_reward_points = latest_points_result.scalar_one_or_none() or 0
 
     return CardDetailResponse(
         id=card.id,
@@ -142,9 +172,81 @@ async def get_card_detail(
         created_at=card.created_at,
         updated_at=card.updated_at,
         statements_count=stats.statements_count or 0,
-        total_reward_points=stats.total_reward_points or 0,
+        total_reward_points=latest_reward_points,
         latest_statement_date=stats.latest_statement_date,
     )
+
+
+@router.patch(
+    "/{card_id}",
+    response_model=CardResponse,
+    summary="Update card status",
+    description="""
+    Update card information (currently only active status).
+    
+    Use this to mark cards as inactive when they are:
+    - Cancelled by the bank
+    - No longer in use
+    - Lost or stolen
+    """,
+    responses={
+        404: {"description": "Card not found"},
+        403: {"description": "Access denied"},
+    },
+)
+async def update_card(
+    card_id: UUID,
+    update_data: CardUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CardResponse:
+    """
+    Update card information.
+
+    Args:
+        card_id: Card ID
+        update_data: Update data
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        Updated card information
+
+    Raises:
+        HTTPException: 404 if not found, 403 if access denied
+    """
+    repo = CardRepository(db)
+    card = await repo.get_by_id(card_id)
+
+    if not card:
+        error_def = get_error("API_003")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "API_003",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    # Check ownership
+    if card.user_id != current_user.id:
+        error_def = get_error("API_004")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "API_004",
+                "user_message": error_def["user_message"],
+                "suggestion": error_def["suggestion"],
+            },
+        )
+
+    # Update card
+    card.is_active = update_data.is_active
+    await db.commit()
+    await db.refresh(card)
+
+    return CardResponse.model_validate(card)
 
 
 @router.get(
@@ -211,9 +313,13 @@ async def get_card_statements(
         )
 
     # Get total count
-    count_query = select(func.count()).select_from(Statement).where(
-        Statement.card_id == card_id,
-        Statement.deleted_at.is_(None),
+    count_query = (
+        select(func.count())
+        .select_from(Statement)
+        .where(
+            Statement.card_id == card_id,
+            Statement.deleted_at.is_(None),
+        )
     )
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -262,5 +368,7 @@ async def get_card_statements(
             total=total,
             total_pages=total_pages,
         ),
-        money=MoneyMeta(currency=settings.currency, minor_unit=settings.currency_minor_unit),
+        money=MoneyMeta(
+            currency=settings.currency, minor_unit=settings.currency_minor_unit
+        ),
     )

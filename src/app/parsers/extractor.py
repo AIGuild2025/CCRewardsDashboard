@@ -8,8 +8,6 @@ affecting the rest of the codebase.
 import io
 from typing import Any
 
-from unstructured.partition.pdf import partition_pdf
-
 
 class PDFExtractionError(Exception):
     """Raised when PDF extraction fails."""
@@ -60,6 +58,10 @@ class PDFExtractor:
             raise ValueError("PDF bytes cannot be empty")
         
         try:
+            # Import lazily to keep server startup fast and avoid importing heavy
+            # optional dependencies (e.g., matplotlib) unless PDF parsing is used.
+            from unstructured.partition.pdf import partition_pdf
+
             # Use BytesIO to avoid temp files
             pdf_file = io.BytesIO(pdf_bytes)
 
@@ -82,7 +84,11 @@ class PDFExtractor:
             error_msg = str(e).lower()
             
             if "password" in error_msg or "encrypted" in error_msg:
-                raise ValueError("PDF is password-protected or password is incorrect") from e
+                # Unstructured throws different exceptions depending on PDF backend.
+                # When no password is provided, prompt for one; otherwise treat as incorrect.
+                if not password:
+                    raise ValueError("PDF password required") from e
+                raise ValueError("Incorrect PDF password") from e
             elif "corrupt" in error_msg or "invalid" in error_msg:
                 raise ValueError("PDF file appears to be corrupted") from e
             else:

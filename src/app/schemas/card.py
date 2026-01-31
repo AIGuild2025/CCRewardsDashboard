@@ -35,7 +35,7 @@ class CardDetailResponse(BaseModel):
     
     # Statistics
     statements_count: int = Field(description="Total number of statements")
-    total_reward_points: int = Field(default=0, description="Total reward points across all statements")
+    total_reward_points: int = Field(default=0, description="Current reward points balance (from latest statement)")
     latest_statement_date: datetime | None = Field(None, description="Date of most recent statement")
 
     model_config = ConfigDict(from_attributes=True)
@@ -48,3 +48,9 @@ class CardListResult(BaseModel):
     total: int = Field(description="Total number of cards")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CardUpdateRequest(BaseModel):
+    """Request to update card information."""
+
+    is_active: bool = Field(description="Whether card is active")

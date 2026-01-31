@@ -34,6 +34,35 @@ class MoneyMeta(BaseModel):
 # Response schemas
 
 
+class RewardsSummary(BaseModel):
+    """Reward summary section (when available)."""
+
+    previous_balance: int | None = Field(
+        None, description="Reward points balance carried from previous statement"
+    )
+    earned: int | None = Field(None, description="Reward points earned this period")
+    redeemed: int | None = Field(
+        None, description="Reward points redeemed/expired/forfeited this period"
+    )
+    closing_balance: int | None = Field(
+        None, description="Reward points closing balance for this statement"
+    )
+
+
+class AccountSummary(BaseModel):
+    """Account summary section (when available).
+
+    All amounts are in minor units (paise/cents) and should be interpreted using
+    the `money` metadata returned by list/detail endpoints.
+    """
+
+    previous_balance: int = Field(description="Previous balance (minor units)")
+    credits: int = Field(description="Payments, reversals & other credits (minor units)")
+    debits: int = Field(description="Purchases & other debits (minor units)")
+    fees: int = Field(description="Fees, taxes & interest charges (minor units)")
+    total_outstanding: int = Field(description="Total outstanding (minor units)")
+
+
 class StatementUploadResult(BaseModel):
     """Result of successful statement processing."""
 
@@ -44,6 +73,12 @@ class StatementUploadResult(BaseModel):
     transactions_count: int = Field(description="Number of transactions extracted")
     reward_points: int = Field(default=0, description="Total reward points balance")
     reward_points_earned: int = Field(default=0, description="Reward points earned this period")
+    rewards_summary: RewardsSummary | None = Field(
+        None, description="Reward summary section (bank-specific; when available)"
+    )
+    account_summary: AccountSummary | None = Field(
+        None, description="Account summary section (bank-specific; when available)"
+    )
     processing_time_ms: int = Field(description="Processing time in milliseconds")
 
     model_config = ConfigDict(from_attributes=True)
@@ -74,6 +109,12 @@ class StatementListResponse(BaseModel):
     closing_balance: int = Field(description="Closing balance in cents")
     reward_points: int = Field(default=0, description="Total reward points balance")
     reward_points_earned: int = Field(default=0, description="Reward points earned this period")
+    rewards_summary: RewardsSummary | None = Field(
+        None, description="Reward summary section (bank-specific; when available)"
+    )
+    account_summary: AccountSummary | None = Field(
+        None, description="Account summary section (bank-specific; when available)"
+    )
     transactions_count: int = Field(description="Number of transactions")
     created_at: datetime = Field(description="Upload timestamp")
 
@@ -137,6 +178,17 @@ class StatementDetailWithSummary(BaseModel):
     statement_month: date = Field(description="Statement period")
     closing_balance: int = Field(description="Closing balance in cents")
     reward_points: int = Field(default=0, description="Total reward points")
+    reward_points_earned: int = Field(default=0, description="Reward points earned this period")
+    rewards_summary: RewardsSummary | None = Field(
+        None, description="Reward summary section (bank-specific; when available)"
+    )
+    account_summary: AccountSummary | None = Field(
+        None, description="Account summary section (bank-specific; when available)"
+    )
+    fee_waivers_credit: int | None = Field(
+        None,
+        description="Sum of credit transactions that look like fee waivers/reversals (minor units)",
+    )
     transactions_count: int = Field(description="Number of transactions")
     created_at: datetime = Field(description="Upload timestamp")
     spending_summary: SpendingSummary = Field(description="Spending breakdown and statistics")

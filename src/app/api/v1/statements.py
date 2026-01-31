@@ -29,18 +29,21 @@ from app.core.exceptions import (
     StatementProcessingError,
     ValidationError,
 )
+from app.models.card import Card
 from app.models.statement import Statement
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.repositories.statement import StatementRepository
 from app.repositories.transaction import TransactionRepository
 from app.schemas.statement import (
+    AccountSummary,
     CategorySummary,
     MoneyMeta,
     MerchantSummary,
     PaginationMeta,
     ProcessingErrorDetail,
     ProcessingErrorResponse,
+    RewardsSummary,
     SpendingSummary,
     StatementDetailWithSummary,
     StatementListResponse,
@@ -56,6 +59,29 @@ router = APIRouter(prefix="/statements", tags=["statements"])
 # Constants
 PDF_MAGIC_BYTES = b"%PDF-"
 ALLOWED_LIMITS = [10, 20, 50, 100]
+
+
+def _rewards_summary_from_masked_content(masked_content: dict | None) -> RewardsSummary | None:
+    if not masked_content:
+        return None
+    raw = masked_content.get("rewards_summary")
+    if not isinstance(raw, dict):
+        return None
+    # Accept partial objects; fields are optional.
+    return RewardsSummary(**raw)
+
+
+def _account_summary_from_masked_content(masked_content: dict | None) -> AccountSummary | None:
+    if not masked_content:
+        return None
+    raw = masked_content.get("account_summary")
+    if not isinstance(raw, dict):
+        return None
+    # Account summary fields are required as a group; ignore partials.
+    try:
+        return AccountSummary(**raw)
+    except Exception:
+        return None
 
 
 def create_error_response(error: StatementProcessingError) -> ProcessingErrorResponse:
@@ -284,6 +310,12 @@ async def list_statements(
     to_date: Annotated[
         date | None, Query(description="Filter statements to date (inclusive)")
     ] = None,
+    include_inactive_cards: Annotated[
+        bool,
+        Query(
+            description="When true, include statements for inactive cards. By default, statements are limited to active cards.",
+        ),
+    ] = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StatementListResult:
@@ -303,8 +335,10 @@ async def list_statements(
         Paginated list of statements
     """
     # Build query
-    query = select(Statement).where(
-        and_(Statement.user_id == current_user.id, Statement.deleted_at.is_(None))
+    query = (
+        select(Statement)
+        .join(Card, Statement.card_id == Card.id)
+        .where(and_(Statement.user_id == current_user.id, Statement.deleted_at.is_(None)))
     )
 
     # Apply filters
@@ -314,6 +348,8 @@ async def list_statements(
         query = query.where(Statement.statement_month >= from_date)
     if to_date:
         query = query.where(Statement.statement_month <= to_date)
+    if not include_inactive_cards:
+        query = query.where(Card.is_active.is_(True))
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -339,6 +375,8 @@ async def list_statements(
             closing_balance=stmt.closing_balance,
             reward_points=stmt.reward_points,
             reward_points_earned=stmt.reward_points_earned,
+            rewards_summary=_rewards_summary_from_masked_content(getattr(stmt, "masked_content", None)),
+            account_summary=_account_summary_from_masked_content(getattr(stmt, "masked_content", None)),
             transactions_count=len(stmt.transactions)
             if hasattr(stmt, "transactions")
             else 0,
@@ -431,6 +469,21 @@ async def get_statement_detail(
     total_credit = sum(t.amount for t in transactions if t.is_credit)
     net_spending = total_debit - total_credit
 
+    # Fee waivers/reversals often appear as credits with "waiver"/"reversal" in the merchant text.
+    fee_waivers_credit = sum(
+        t.amount
+        for t in transactions
+        if t.is_credit
+        and (
+            "waiver" in (t.merchant or "").lower()
+            or "waive" in (t.merchant or "").lower()
+            or "reversal" in (t.merchant or "").lower()
+            or (t.category or "").lower() == "fees"
+        )
+    )
+    if fee_waivers_credit <= 0:
+        fee_waivers_credit = None
+
     debit_transactions = [t for t in transactions if not t.is_credit]
 
     # Group by category (debit-only for "expenditure").
@@ -505,6 +558,10 @@ async def get_statement_detail(
         statement_month=statement.statement_month,
         closing_balance=statement.closing_balance,
         reward_points=statement.reward_points,
+        reward_points_earned=statement.reward_points_earned,
+        rewards_summary=_rewards_summary_from_masked_content(getattr(statement, "masked_content", None)),
+        account_summary=_account_summary_from_masked_content(getattr(statement, "masked_content", None)),
+        fee_waivers_credit=fee_waivers_credit,
         transactions_count=len(transactions),
         created_at=statement.created_at,
         spending_summary=summary,

@@ -7,13 +7,14 @@ import logging
 import io
 import re
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from itertools import permutations
 from typing import Any
 
 from pypdf import PdfReader
 
 from app.parsers.generic import GenericParser
-from app.schemas.internal import ParsedTransaction
+from app.schemas.internal import ParsedAccountSummary, ParsedTransaction
 
 
 logger = logging.getLogger(__name__)
@@ -43,14 +44,23 @@ class SBIParser(GenericParser):
         
         SBI shows both earned this period and total balance.
         """
+        full_text = "\n".join(str(element) for element in elements)
+
         # Initialize the earned points tracker
         self._reward_points_earned = 0
+        self._reward_points_previous = None
+        self._reward_points_redeemed = None
+
+        account_summary = self._find_account_summary(elements, full_text)
         
         # Call parent parse which will call our _find_rewards()
         parsed = super().parse(elements)
         
         # Update with the earned value we captured
         parsed.reward_points_earned = self._reward_points_earned
+        parsed.reward_points_previous = self._reward_points_previous
+        parsed.reward_points_redeemed = self._reward_points_redeemed
+        parsed.account_summary = account_summary
         
         return parsed
 
@@ -171,6 +181,33 @@ class SBIParser(GenericParser):
         #       previous + earned - redeemed == closing
         normalized_text = re.sub(r"\s+", " ", full_text)
 
+        def _score_assignment(nums: list[int], cand: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+            """Rank a candidate mapping (previous, earned, redeemed, closing).
+
+            Lower is better.
+            """
+            previous, earned, redeemed, closing = cand
+            min_val = min(nums)
+            max_val = max(nums)
+
+            penalty = 0
+            if closing == min_val:
+                penalty += 1000
+            if closing < previous:
+                penalty += 100
+            # Earned points are usually smaller than the carried forward balance.
+            if earned > previous:
+                penalty += 200
+            if earned == max_val:
+                penalty += 100
+            # Prefer assignments where redeemed is minimal (often 0).
+            penalty += redeemed
+            # Small nudge toward non-zero earned when possible.
+            penalty += 10 if earned == 0 else 0
+            # Mild preference for closing being the largest number.
+            penalty += 0 if closing == max_val else 5
+            return (penalty, redeemed, -earned, -closing)
+
         def _try_assign(nums: list[int]) -> tuple[int, int, int, int] | None:
             """Try to map 4 numbers onto (previous, earned, redeemed, closing).
 
@@ -193,34 +230,7 @@ class SBIParser(GenericParser):
             if not candidates:
                 return None
 
-            # Heuristic ranking to disambiguate:
-            # - Closing balance being the smallest is very unlikely
-            # - Prefer closing >= previous (common for typical billing cycles)
-            # - Prefer smaller redeemed (often 0) and non-zero earned when possible
-            min_val = min(nums)
-            max_val = max(nums)
-
-            def score(cand: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-                previous, earned, redeemed, closing = cand
-                penalty = 0
-                if closing == min_val:
-                    penalty += 1000
-                if closing < previous:
-                    penalty += 100
-                # Earned points are usually smaller than the carried forward balance.
-                if earned > previous:
-                    penalty += 200
-                if earned == max_val:
-                    penalty += 100
-                # Prefer assignments where redeemed is minimal (often 0).
-                penalty += redeemed
-                # Small nudge toward non-zero earned when possible.
-                penalty += 10 if earned == 0 else 0
-                # Mild preference for closing being the largest number.
-                penalty += 0 if closing == max_val else 5
-                return (penalty, redeemed, -earned, -closing)
-
-            return min(candidates, key=score)
+            return min(candidates, key=lambda c: _score_assignment(nums, c))
 
         four_num_pattern = r"(\d[\d,]*)\s+(\d[\d,]*)\s+(\d[\d,]*)\s+(\d[\d,]*)"
         for match in re.finditer(four_num_pattern, normalized_text):
@@ -282,6 +292,17 @@ class SBIParser(GenericParser):
                     anchored = (previous, earned, redeemed, closing)
 
             assigned = anchored or _try_assign(nums)
+            best = _try_assign(nums)
+            assigned: tuple[int, int, int, int] | None
+            if anchored and best:
+                assigned = (
+                    anchored
+                    if _score_assignment(nums, anchored) <= _score_assignment(nums, best)
+                    else best
+                )
+            else:
+                assigned = anchored or best
+
             if not assigned:
                 continue
 
@@ -296,11 +317,207 @@ class SBIParser(GenericParser):
                 },
             )
             self._reward_points_earned = earned
+            self._reward_points_previous = previous
+            self._reward_points_redeemed = redeemed
             return closing
 
         logger.debug("Reward points not found; defaulting to 0")
         self._reward_points_earned = 0
+        self._reward_points_previous = None
+        self._reward_points_redeemed = None
         return 0
+
+    def _find_account_summary(
+        self, elements: list[Any], full_text: str
+    ) -> ParsedAccountSummary | None:
+        """Extract SBI 'ACCOUNT SUMMARY' table (amounts in minor units).
+
+        SBI statements typically include an "ACCOUNT SUMMARY" section with:
+          - Previous Balance
+          - Payments, Reversals & other Credits
+          - Purchases & Other Debits
+          - Fee, Taxes & Interest Charges
+          - Total Outstanding
+
+        OCR/text extraction may reorder columns or place the numeric row before headers,
+        so we use an invariant-based assignment:
+
+            previous - credits + debits + fees ≈ outstanding
+
+        Returns:
+            ParsedAccountSummary if found, otherwise None.
+        """
+
+        def _money_to_cents(raw: str) -> int | None:
+            s = raw.strip().replace(",", "")
+            if not s:
+                return None
+            try:
+                # Amounts are printed with 2 decimals; convert to minor units.
+                return int(Decimal(s) * 100)
+            except (InvalidOperation, ValueError):
+                return None
+
+        normalized = re.sub(r"\s+", " ", full_text)
+        lower = normalized.lower()
+        idx = lower.find("account summary")
+        if idx < 0:
+            return None
+
+        # Keep a bounded window to avoid matching unrelated 5-number runs.
+        section = normalized[idx : min(len(normalized), idx + 2600)]
+
+        amount_pat = r"(\d[\d,]*\.\d{2})"
+        five_amounts_pat = (
+            rf"{amount_pat}\s+{amount_pat}\s+{amount_pat}\s+{amount_pat}\s+{amount_pat}"
+        )
+
+        def _delta(
+            previous: int, credits: int, debits: int, fees: int, outstanding: int
+        ) -> int:
+            return (previous - credits + debits + fees) - outstanding
+
+        def _heuristic_penalty(nums: list[int], cand: tuple[int, int, int, int, int]) -> int:
+            previous, credits, debits, fees, outstanding = cand
+            sorted_nums = sorted(nums)
+            smallest_two = set(sorted_nums[:2])
+            largest_two = set(sorted_nums[-2:])
+
+            penalty = 0
+            # Fees are often small (including 0.00).
+            if fees not in smallest_two:
+                penalty += 25
+            # Credits and previous balance are frequently among larger figures.
+            if credits in smallest_two:
+                penalty += 25
+            if previous in smallest_two:
+                penalty += 25
+            if credits not in largest_two:
+                penalty += 5
+            # Outstanding is often closer to debits than to previous balance.
+            penalty += min(abs(outstanding - debits) // 100, 50)
+            return penalty
+
+        def _best_assignment(
+            nums: list[int], prefer_ordered: bool
+        ) -> tuple[ParsedAccountSummary, int] | None:
+            # Allow a small tolerance for rounding/formatting differences.
+            max_abs_delta = 200  # 2 INR (paise)
+
+            candidates: list[tuple[int, int, tuple[int, int, int, int, int]]] = []
+
+            # Try a "natural order" candidate first when the numeric row precedes headers.
+            if prefer_ordered:
+                ordered = (nums[0], nums[1], nums[2], nums[3], nums[4])
+                d = _delta(*ordered)
+                if abs(d) <= max_abs_delta:
+                    candidates.append((abs(d), _heuristic_penalty(nums, ordered), ordered))
+
+            for idxs in permutations(range(5), 5):
+                cand = (nums[idxs[0]], nums[idxs[1]], nums[idxs[2]], nums[idxs[3]], nums[idxs[4]])
+                d = _delta(*cand)
+                if abs(d) <= max_abs_delta:
+                    candidates.append((abs(d), _heuristic_penalty(nums, cand), cand))
+
+            if not candidates:
+                return None
+
+            best = min(candidates, key=lambda x: (x[0], x[1]))[2]
+            previous, credits, debits, fees, outstanding = best
+            d = _delta(previous, credits, debits, fees, outstanding)
+            return (
+                ParsedAccountSummary(
+                    previous_balance_cents=previous,
+                    credits_cents=credits,
+                    debits_cents=debits,
+                    fees_cents=fees,
+                    total_outstanding_cents=outstanding,
+                ),
+                d,
+            )
+
+        # Strategy A: label-anchored extraction (most reliable when labels survive extraction).
+        def _amount_after(label_re: str) -> int | None:
+            m = re.search(label_re, section, re.IGNORECASE)
+            if not m:
+                return None
+            window = section[m.end() : min(len(section), m.end() + 260)]
+            m2 = re.search(amount_pat, window)
+            if not m2:
+                return None
+            return _money_to_cents(m2.group(1))
+
+        prev = _amount_after(r"previous\s+balance")
+        credits = _amount_after(r"payments.*?credits|reversals.*?credits|other\s+credits")
+        debits = _amount_after(r"purchases\s*&?\s*other\s+debits|purchases\s+and\s+other\s+debits")
+        fees = _amount_after(r"fee.*?taxes.*?interest|fees.*?taxes.*?interest")
+        outstanding = _amount_after(r"total\s+outstanding")
+
+        if (
+            prev is not None
+            and credits is not None
+            and debits is not None
+            and fees is not None
+            and outstanding is not None
+        ):
+            d = _delta(prev, credits, debits, fees, outstanding)
+            if abs(d) <= 200:
+                return ParsedAccountSummary(
+                    previous_balance_cents=prev,
+                    credits_cents=credits,
+                    debits_cents=debits,
+                    fees_cents=fees,
+                    total_outstanding_cents=outstanding,
+                )
+
+        # Strategy B: detect a 5-number row near the ACCOUNT SUMMARY keywords and assign via invariant.
+        best: tuple[ParsedAccountSummary, int] | None = None
+        for match in re.finditer(five_amounts_pat, section):
+            start, end = match.span()
+            ctx = section[max(0, start - 240) : min(len(section), end + 240)].lower()
+            if "previous" not in ctx or "outstanding" not in ctx:
+                continue
+
+            raw_nums = [match.group(i) for i in range(1, 6)]
+            nums: list[int] = []
+            for raw in raw_nums:
+                cents = _money_to_cents(raw)
+                if cents is None:
+                    nums = []
+                    break
+                nums.append(cents)
+            if len(nums) != 5:
+                continue
+
+            pre = section[max(0, start - 120) : start].lower()
+            post = section[end : min(len(section), end + 180)].lower()
+            prefer_ordered = ("previous balance" in post and "total outstanding" in post) or (
+                "previous balance" in pre and "total outstanding" in pre
+            )
+
+            assigned = _best_assignment(nums, prefer_ordered=prefer_ordered)
+            if not assigned:
+                continue
+
+            cand_summary, cand_delta = assigned
+            if best is None or (abs(cand_delta) < abs(best[1])):
+                best = (cand_summary, cand_delta)
+
+        if best:
+            logger.debug(
+                "Account summary found via invariant",
+                extra={
+                    "previous_balance_cents": best[0].previous_balance_cents,
+                    "credits_cents": best[0].credits_cents,
+                    "debits_cents": best[0].debits_cents,
+                    "fees_cents": best[0].fees_cents,
+                    "total_outstanding_cents": best[0].total_outstanding_cents,
+                    "delta_cents": best[1],
+                },
+            )
+            return best[0]
+
+        return None
 
     def _extract_transactions(
         self, elements: list[Any], full_text: str

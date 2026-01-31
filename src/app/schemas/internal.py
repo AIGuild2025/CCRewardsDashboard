@@ -50,6 +50,21 @@ class ParsedTransaction(BaseModel):
         )
 
 
+class ParsedAccountSummary(BaseModel):
+    """Represents the 'Account Summary' section (when available).
+
+    All amounts are in the smallest currency unit (paise for INR, cents for USD).
+    """
+
+    previous_balance_cents: int = Field(description="Previous balance (minor units)")
+    credits_cents: int = Field(
+        description="Payments, reversals & other credits (minor units)"
+    )
+    debits_cents: int = Field(description="Purchases & other debits (minor units)")
+    fees_cents: int = Field(description="Fees, taxes & interest charges (minor units)")
+    total_outstanding_cents: int = Field(description="Total outstanding (minor units)")
+
+
 class ParsedStatement(BaseModel):
     """Represents a complete parsed credit card statement.
     
@@ -62,6 +77,15 @@ class ParsedStatement(BaseModel):
     closing_balance_cents: int = Field(..., description="Statement closing balance in cents")
     reward_points: int = Field(default=0, description="Total reward points balance (accumulated)")
     reward_points_earned: int = Field(default=0, description="Reward points earned this period")
+    reward_points_previous: int | None = Field(
+        None, description="Reward points previous balance (if available)"
+    )
+    reward_points_redeemed: int | None = Field(
+        None, description="Reward points redeemed/expired/forfeited this period (if available)"
+    )
+    account_summary: ParsedAccountSummary | None = Field(
+        None, description="Account summary section (bank-specific; when available)"
+    )
     transactions: list[ParsedTransaction] = Field(
         default_factory=list,
         description="List of transactions"

@@ -48,4 +48,9 @@ echo -e "${GREEN}🌐 Starting FastAPI server on http://localhost:8000${NC}"
 echo -e "${GREEN}📚 API Documentation: http://localhost:8000/docs${NC}\n"
 
 export PYTHONPATH="${PWD}/src"
+# Some dependencies (e.g., matplotlib via unstructured) require writable temp/cache dirs.
+# Use repo-local dirs to avoid failures in restricted environments.
+export TMPDIR="${PWD}/.tmp"
+export MPLCONFIGDIR="${PWD}/.cache/matplotlib"
+mkdir -p "$TMPDIR" "$MPLCONFIGDIR"
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
