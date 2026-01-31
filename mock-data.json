@@ -1,0 +1,722 @@
+[
+  {
+    "card_number": "375987654321001",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321002",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321003",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321004",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321005",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321006",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321007",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321008",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321009",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321010",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321011",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321012",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321013",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321014",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321015",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321016",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321017",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321018",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321019",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321020",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321021",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321022",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321023",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321024",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321025",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321026",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321027",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321028",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321029",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321030",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321031",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321032",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321033",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321034",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321035",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321036",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321037",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321038",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321039",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321040",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321041",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321042",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321043",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321044",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321045",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321046",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321047",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321048",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321049",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321050",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321051",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321052",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321053",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321054",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321055",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321056",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321057",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321058",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321059",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321060",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321061",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321062",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321063",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321064",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321065",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321066",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321067",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321068",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321069",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321070",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321071",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321072",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321073",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321074",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321075",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321076",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321077",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321078",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321079",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321080",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321081",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321082",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321083",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321084",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321085",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321086",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321087",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321088",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321089",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321090",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321091",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321092",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321093",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321094",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321095",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321096",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321097",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321098",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321099",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321100",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321101",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321102",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321103",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321104",
+    "points_balance": 45000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321105",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321106",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321107",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321108",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321109",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321110",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321111",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "INSUFFICIENT_POINTS"
+  },
+  {
+    "card_number": "375987654321112",
+    "points_balance": 20000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321113",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321114",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321115",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321116",
+    "points_balance": 125000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321117",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321118",
+    "points_balance": 0,
+    "points_required": 45000,
+    "status": "CARD_BLOCKED"
+  },
+  {
+    "card_number": "375987654321119",
+    "points_balance": 200000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  },
+  {
+    "card_number": "375987654321120",
+    "points_balance": 90000,
+    "points_required": 45000,
+    "status": "APPROVED"
+  }
+]
