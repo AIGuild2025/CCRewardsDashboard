@@ -321,6 +321,12 @@
 			"type": "string"
 		},
 		{
+			"key": "base_url_render",
+			"value": "https://cc-rewards-api.onrender.com",
+			"type": "string",
+			"disabled": true
+		},
+		{
 			"key": "auth_token",
 			"value": "cc_user1_token_2026",
 			"type": "string"
