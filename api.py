@@ -173,9 +173,9 @@ async def parse_pdf(
             response_data['model_info'] = {
                 'primary_model': config.groq_model,
                 'validation_model': validation_result.get('validation_model', 'llama-3.1-8b-instant'),
-                'accuracy': validation_result.get('accuracy', 0),
+                'accuracy': validation_result.get('accuracy_percent', 0),
                 'matches': validation_result.get('matches', 0),
-                'total_transactions': validation_result.get('total', 0),
+                'total_transactions': validation_result.get('total_transactions', 0),
                 'validation_enabled': True
             }
         else:
