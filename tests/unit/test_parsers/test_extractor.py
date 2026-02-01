@@ -4,6 +4,7 @@ import io
 from unittest.mock import Mock, patch
 
 import pytest
+from pypdf import PdfWriter
 
 from app.parsers.extractor import PDFExtractionError, PDFExtractor
 
@@ -69,6 +70,60 @@ class TestPDFExtractor:
             extractor.extract(b"bad pdf")
 
         assert "corrupted" in str(exc_info.value).lower()
+
+    @patch("app.parsers.extractor.partition_pdf")
+    def test_extract_encrypted_requires_password(self, mock_partition):
+        """Encrypted PDFs should prompt for password before calling Unstructured."""
+        w = PdfWriter()
+        w.add_blank_page(width=200, height=200)
+        w.encrypt("secret")
+        buf = io.BytesIO()
+        w.write(buf)
+        encrypted = buf.getvalue()
+
+        extractor = PDFExtractor()
+        with pytest.raises(ValueError, match="password required"):
+            extractor.extract(encrypted, password=None)
+
+        mock_partition.assert_not_called()
+
+    @patch("app.parsers.extractor.partition_pdf")
+    def test_extract_encrypted_incorrect_password(self, mock_partition):
+        """Encrypted PDFs with wrong password should raise incorrect password."""
+        w = PdfWriter()
+        w.add_blank_page(width=200, height=200)
+        w.encrypt("secret")
+        buf = io.BytesIO()
+        w.write(buf)
+        encrypted = buf.getvalue()
+
+        extractor = PDFExtractor()
+        with pytest.raises(ValueError, match="(?i)incorrect pdf password"):
+            extractor.extract(encrypted, password="wrong")
+
+        mock_partition.assert_not_called()
+
+    @patch("app.parsers.extractor.partition_pdf")
+    def test_extract_encrypted_correct_password_decrypts(self, mock_partition):
+        """Encrypted PDFs should be decrypted before passing to Unstructured."""
+        w = PdfWriter()
+        w.add_blank_page(width=200, height=200)
+        w.encrypt("secret")
+        buf = io.BytesIO()
+        w.write(buf)
+        encrypted = buf.getvalue()
+
+        mock_element = Mock()
+        mock_partition.return_value = [mock_element]
+
+        extractor = PDFExtractor()
+        elements = extractor.extract(encrypted, password="secret")
+        assert elements == [mock_element]
+
+        call_kwargs = mock_partition.call_args.kwargs
+        assert isinstance(call_kwargs["file"], io.BytesIO)
+        # Should not pass password downstream after decrypt.
+        assert call_kwargs["password"] is None
 
     def test_get_full_text(self):
         """Test concatenating element text."""

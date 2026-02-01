@@ -15,6 +15,17 @@ class PDFExtractionError(Exception):
     pass
 
 
+def partition_pdf(*args, **kwargs):
+    """Lazily import and call Unstructured's PDF partitioner.
+
+    Kept as a module-level symbol so tests can patch `app.parsers.extractor.partition_pdf`
+    without importing heavy dependencies at process start.
+    """
+    from unstructured.partition.pdf import partition_pdf as _partition_pdf
+
+    return _partition_pdf(*args, **kwargs)
+
+
 class PDFExtractor:
     """Wrapper around Unstructured.io for PDF text extraction.
 
@@ -56,23 +67,102 @@ class PDFExtractor:
         """
         if not pdf_bytes or len(pdf_bytes) == 0:
             raise ValueError("PDF bytes cannot be empty")
-        
+
+        normalized_password = password.strip() if isinstance(password, str) else None
+        if normalized_password == "":
+            normalized_password = None
+
         try:
-            # Import lazily to keep server startup fast and avoid importing heavy
-            # optional dependencies (e.g., matplotlib) unless PDF parsing is used.
-            from unstructured.partition.pdf import partition_pdf
+            # If encrypted, validate/decrypt up-front using pypdf.
+            # This avoids relying on downstream libraries to handle all encryption variants,
+            # and ensures we return correct error codes (required vs incorrect password).
+            bytes_to_parse = pdf_bytes
+            password_for_unstructured = normalized_password
+            if pdf_bytes.startswith(b"%PDF"):
+                try:
+                    from pypdf import PdfReader, PdfWriter
+                except ImportError:
+                    PdfReader = None  # type: ignore[assignment]
+                    PdfWriter = None  # type: ignore[assignment]
+
+                if PdfReader is not None and PdfWriter is not None:
+                    try:
+                        reader = PdfReader(io.BytesIO(pdf_bytes))
+                    except Exception:
+                        reader = None
+
+                    if reader is not None and getattr(reader, "is_encrypted", False):
+                        password_to_try = normalized_password
+                        if not password_to_try:
+                            # Some PDFs are encrypted but use an empty user password.
+                            password_to_try = ""
+
+                        ok = reader.decrypt(password_to_try)
+                        if not ok:
+                            if not normalized_password:
+                                raise ValueError("PDF password required")
+                            raise ValueError("Incorrect PDF password")
+
+                        # Decrypt to plain PDF bytes for downstream parsing.
+                        try:
+                            writer = PdfWriter()
+                            for page in reader.pages:
+                                writer.add_page(page)
+                            out = io.BytesIO()
+                            writer.write(out)
+                        except Exception:
+                            # If pypdf can't re-write this decrypted PDF, fall back to Unstructured.
+                            bytes_to_parse = pdf_bytes
+                            password_for_unstructured = normalized_password
+                        else:
+                            bytes_to_parse = out.getvalue()
+                            password_for_unstructured = None
 
             # Use BytesIO to avoid temp files
-            pdf_file = io.BytesIO(pdf_bytes)
+            pdf_file = io.BytesIO(bytes_to_parse)
 
-            elements = partition_pdf(
-                file=pdf_file,
-                strategy=self.strategy,
-                include_page_breaks=True,      # Helps with multi-page statements
-                infer_table_structure=True,    # Extract transaction tables
-                extract_images_in_pdf=False,   # Skip images for security/speed
-                password=password,             # Handle encrypted PDFs
-            )
+            try:
+                elements = partition_pdf(
+                    file=pdf_file,
+                    strategy=self.strategy,
+                    include_page_breaks=True,      # Helps with multi-page statements
+                    infer_table_structure=True,    # Extract transaction tables
+                    extract_images_in_pdf=False,   # Skip images for security/speed
+                    password=password_for_unstructured,  # Handle encrypted PDFs (if still encrypted)
+                )
+            except Exception:
+                # Unstructured may fail due to optional OCR dependencies (tesseract),
+                # font cache/temp issues, or model downloads. Fall back to deterministic
+                # pypdf text extraction so downstream parsers can still run.
+                if bytes_to_parse.startswith(b"%PDF"):
+                    try:
+                        from pypdf import PdfReader
+
+                        reader = PdfReader(io.BytesIO(bytes_to_parse))
+                        if getattr(reader, "is_encrypted", False):
+                            ok = reader.decrypt(password_for_unstructured or "")
+                            if not ok:
+                                if not password_for_unstructured:
+                                    raise ValueError("PDF password required")
+                                raise ValueError("Incorrect PDF password")
+
+                        texts = [(page.extract_text() or "") for page in reader.pages]
+                        texts = [t for t in texts if t.strip()]
+                        if texts:
+                            class _TextElement:
+                                __slots__ = ("text", "category")
+
+                                def __init__(self, text: str):
+                                    self.text = text
+                                    self.category = "NarrativeText"
+
+                                def __str__(self) -> str:
+                                    return self.text
+
+                            return [_TextElement(t) for t in texts]
+                    except Exception:
+                        pass
+                raise
             
             if not elements:
                 raise ValueError("PDF extraction returned no elements (empty or corrupted)")
@@ -86,7 +176,7 @@ class PDFExtractor:
             if "password" in error_msg or "encrypted" in error_msg:
                 # Unstructured throws different exceptions depending on PDF backend.
                 # When no password is provided, prompt for one; otherwise treat as incorrect.
-                if not password:
+                if not normalized_password:
                     raise ValueError("PDF password required") from e
                 raise ValueError("Incorrect PDF password") from e
             elif "corrupt" in error_msg or "invalid" in error_msg:

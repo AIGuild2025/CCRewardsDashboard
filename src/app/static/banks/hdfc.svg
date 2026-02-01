@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="HDFC Bank">
+  <!-- Transparent background by default -->
+
+  <!-- HDFC mark (approximation matching provided logo structure) -->
+  <!-- Outer red corner blocks -->
+  <g fill="#e60012">
+    <!-- top-left -->
+    <rect x="20" y="20" width="88" height="24"/>
+    <rect x="20" y="20" width="24" height="88"/>
+    <!-- top-right -->
+    <rect x="148" y="20" width="88" height="24"/>
+    <rect x="212" y="20" width="24" height="88"/>
+    <!-- bottom-left -->
+    <rect x="20" y="148" width="24" height="88"/>
+    <rect x="20" y="212" width="88" height="24"/>
+    <!-- bottom-right -->
+    <rect x="212" y="148" width="24" height="88"/>
+    <rect x="148" y="212" width="88" height="24"/>
+  </g>
+
+  <!-- Center blue square -->
+  <rect x="88" y="88" width="80" height="80" fill="#003a8c"/>
+
+  <!-- Bottom blue bar with text -->
+  <rect x="16" y="200" width="224" height="48" fill="#003a8c"/>
+  <text
+    x="128"
+    y="232"
+    text-anchor="middle"
+    font-family="Arial, Helvetica, sans-serif"
+    font-weight="800"
+    font-size="34"
+    fill="#ffffff"
+    letter-spacing="1"
+  >HDFC BANK</text>
+</svg>

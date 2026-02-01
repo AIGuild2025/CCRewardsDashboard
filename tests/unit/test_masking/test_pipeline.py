@@ -1,8 +1,10 @@
 """Tests for PII masking pipeline."""
 
+import re
 from uuid import uuid4
 
 import pytest
+from presidio_analyzer import RecognizerResult
 
 from app.masking.pipeline import PIIMaskingPipeline
 
@@ -191,6 +193,56 @@ class TestHMACTokenization:
         
         # Should have different tokens
         assert masked1 != masked2
+
+    def test_multiple_names_do_not_collapse_to_same_token(self, monkeypatch):
+        """Regression: multiple PERSON spans in one string must not share one token."""
+        user_id = uuid4()
+        pipeline = PIIMaskingPipeline(user_id=user_id)
+
+        text = "Transfer to John Smith and Jane Doe"
+        start1 = text.index("John Smith")
+        end1 = start1 + len("John Smith")
+        start2 = text.index("Jane Doe")
+        end2 = start2 + len("Jane Doe")
+
+        fake_results = [
+            RecognizerResult(entity_type="PERSON", start=start1, end=end1, score=0.95),
+            RecognizerResult(entity_type="PERSON", start=start2, end=end2, score=0.95),
+        ]
+
+        def _fake_analyze(*args, **kwargs):
+            return fake_results
+
+        monkeypatch.setattr(pipeline.analyzer, "analyze", _fake_analyze)
+
+        masked = pipeline.mask_text(text)
+        tokens = re.findall(r"\[NAME_([0-9a-f]{8})\]", masked)
+        assert len(tokens) == 2
+        assert len(set(tokens)) == 2
+
+    def test_merchant_like_person_spans_are_preserved(self, monkeypatch):
+        """Heuristic: avoid masking merchant strings misclassified as PERSON."""
+        user_id = uuid4()
+        pipeline = PIIMaskingPipeline(user_id=user_id)
+
+        text = "ADITYA BIRLA FASHION AND Kurla"
+        start1 = text.index("BIRLA FASHION")
+        end1 = start1 + len("BIRLA FASHION")
+        start2 = text.index("Kurla")
+        end2 = start2 + len("Kurla")
+
+        fake_results = [
+            RecognizerResult(entity_type="PERSON", start=start1, end=end1, score=0.8),
+            RecognizerResult(entity_type="PERSON", start=start2, end=end2, score=0.8),
+        ]
+
+        def _fake_analyze(*args, **kwargs):
+            return fake_results
+
+        monkeypatch.setattr(pipeline.analyzer, "analyze", _fake_analyze)
+
+        masked = pipeline.mask_text(text)
+        assert masked == text
 
 
 class TestValidation:

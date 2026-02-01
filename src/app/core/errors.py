@@ -43,14 +43,14 @@ ERROR_CATALOG: dict[str, dict] = {
         "code": "PARSE_003",
         "message": "PDF is password-protected",
         "user_message": "This statement requires a password.",
-        "suggestion": "Please provide the PDF password and try again.",
+        "suggestion": "Please provide the PDF password and try again (avoid extra spaces/quotes).",
         "retry_allowed": True,
     },
     "PARSE_004": {
         "code": "PARSE_004",
         "message": "Incorrect password provided for encrypted PDF",
         "user_message": "The password you provided is incorrect.",
-        "suggestion": "Check your password and try again.",
+        "suggestion": "Check the password (remove leading/trailing spaces) and verify it by opening the PDF locally, then try again.",
         "retry_allowed": True,
     },
     "PARSE_005": {

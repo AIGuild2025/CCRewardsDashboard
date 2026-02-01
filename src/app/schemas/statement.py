@@ -69,6 +69,9 @@ class StatementUploadResult(BaseModel):
     statement_id: UUID = Field(description="ID of the created statement")
     card_id: UUID = Field(description="ID of the associated card")
     bank: str | None = Field(None, description="Detected bank code")
+    bank_logo_url: str | None = Field(
+        None, description="Optional static logo URL for the bank (when available)"
+    )
     statement_month: date = Field(description="Statement period (YYYY-MM-DD)")
     transactions_count: int = Field(description="Number of transactions extracted")
     reward_points: int = Field(default=0, description="Total reward points balance")
@@ -105,6 +108,9 @@ class StatementListResponse(BaseModel):
     card_id: UUID = Field(description="Card ID")
     card_last_four: str = Field(description="Last 4 digits of card")
     bank_code: str | None = Field(None, description="Bank identifier")
+    bank_logo_url: str | None = Field(
+        None, description="Optional static logo URL for the bank (when available)"
+    )
     statement_month: date = Field(description="Statement period")
     closing_balance: int = Field(description="Closing balance in cents")
     reward_points: int = Field(default=0, description="Total reward points balance")
@@ -175,6 +181,9 @@ class StatementDetailWithSummary(BaseModel):
     card_id: UUID
     card_last_four: str = Field(description="Last 4 digits of card")
     bank_code: str | None = Field(None, description="Bank identifier")
+    bank_logo_url: str | None = Field(
+        None, description="Optional static logo URL for the bank (when available)"
+    )
     statement_month: date = Field(description="Statement period")
     closing_balance: int = Field(description="Closing balance in cents")
     reward_points: int = Field(default=0, description="Total reward points")

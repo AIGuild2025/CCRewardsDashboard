@@ -32,6 +32,10 @@ class TestGenericParser:
 
         # DD/MM/YY
         assert parser._parse_date("15/01/25") == date(2025, 1, 15)
+        # DD.MM.YYYY
+        assert parser._parse_date("15.01.2025") == date(2025, 1, 15)
+        # DD.MM.YY
+        assert parser._parse_date("15.01.25") == date(2025, 1, 15)
 
     def test_parse_date_invalid(self):
         """Test parsing invalid date raises error."""
@@ -64,6 +68,10 @@ class TestGenericParser:
 
         assert parser._parse_amount("1234.56") == Decimal("1234.56")
         assert parser._parse_amount("99") == Decimal("99")
+        assert parser._parse_amount("(1,234.56)") == Decimal("1234.56")
+        assert parser._parse_amount("1,234.56-") == Decimal("1234.56")
+        assert parser._parse_amount("1,234.56 CR") == Decimal("1234.56")
+        assert parser._parse_amount("1,234.56 DR") == Decimal("1234.56")
 
     def test_parse_amount_invalid(self):
         """Test parsing invalid amount raises error."""
@@ -84,6 +92,9 @@ class TestGenericParser:
 
         text3 = "Card xxxxxxxxxxxx9012"
         assert parser._find_card_number([], text3) == "9012"
+
+        text4 = "Card No: 4893XXXXXXXXXX3777"
+        assert parser._find_card_number([], text4) == "3777"
 
     def test_find_card_number_not_found(self):
         """Test card number extraction failure."""
@@ -107,6 +118,10 @@ class TestGenericParser:
         """
         result2 = parser._find_statement_period([], text2)
         assert result2 == date(2024, 12, 1)
+
+        text3 = "Statement Date: 13/07/2025"
+        result3 = parser._find_statement_period([], text3)
+        assert result3 == date(2025, 7, 1)
 
     def test_find_statement_period_not_found(self):
         """Test statement period extraction failure."""
@@ -222,6 +237,21 @@ class TestGenericParser:
 
         assert len(transactions) >= 0  # Pattern matching may vary
         # Note: Real-world transaction extraction would be more sophisticated
+
+    def test_extract_transactions_handles_cr_dr_and_dots(self):
+        """Transactions with CR/DR suffixes and dot dates should parse."""
+        parser = GenericParser()
+
+        text = """
+        13.07.2025 SALARY CREDIT 10,000.00 CR
+        14.07.2025 GROCERY STORE 1,234.56 DR
+        15.07.2025 REFUND AMAZON (500.00)
+        """
+
+        txns = parser._extract_transactions([], text)
+        # At least the debit/credit should be detected for the first two.
+        assert any(t.transaction_type == "credit" and t.amount_cents == 1000000 for t in txns)
+        assert any(t.transaction_type == "debit" and t.amount_cents == 123456 for t in txns)
 
     def test_parse_full_statement(self):
         """Test parsing a complete statement."""

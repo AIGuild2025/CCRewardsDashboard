@@ -15,6 +15,9 @@ class CardResponse(BaseModel):
     network: str | None = Field(None, description="Card network (Visa, Mastercard, etc.)")
     product_name: str | None = Field(None, description="Card product name")
     is_active: bool = Field(description="Whether card is active")
+    bank_logo_url: str | None = Field(
+        None, description="Optional static logo URL for the bank (when available)"
+    )
     created_at: datetime = Field(description="Card creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
 
@@ -30,6 +33,9 @@ class CardDetailResponse(BaseModel):
     network: str | None = Field(None, description="Card network (Visa, Mastercard, etc.)")
     product_name: str | None = Field(None, description="Card product name")
     is_active: bool = Field(description="Whether card is active")
+    bank_logo_url: str | None = Field(
+        None, description="Optional static logo URL for the bank (when available)"
+    )
     created_at: datetime = Field(description="Card creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
     

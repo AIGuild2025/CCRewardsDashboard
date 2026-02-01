@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.config import settings
+from app.core.banks import get_bank_logo_url
 from app.core.errors import get_error
 from app.models.card import Card
 from app.models.statement import Statement
@@ -70,7 +71,12 @@ async def list_cards(
     )
 
     return CardListResult(
-        cards=[CardResponse.model_validate(card) for card in cards],
+        cards=[
+            CardResponse.model_validate(card).model_copy(
+                update={"bank_logo_url": get_bank_logo_url(card.bank_code)}
+            )
+            for card in cards
+        ],
         total=len(cards),
     )
 
@@ -169,6 +175,7 @@ async def get_card_detail(
         network=card.network,
         product_name=card.product_name,
         is_active=card.is_active,
+        bank_logo_url=get_bank_logo_url(card.bank_code),
         created_at=card.created_at,
         updated_at=card.updated_at,
         statements_count=stats.statements_count or 0,

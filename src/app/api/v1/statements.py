@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.config import settings
+from app.core.banks import get_bank_logo_url
 from app.core.errors import get_error
 from app.core.exceptions import (
     BankDetectionError,
@@ -264,7 +265,7 @@ async def upload_statement(
             trigger_rag_processing, result.statement_id, current_user.id
         )
 
-        return result
+        return result.model_copy(update={"bank_logo_url": get_bank_logo_url(result.bank)})
 
     except (
         PDFExtractionError,
@@ -371,6 +372,7 @@ async def list_statements(
             card_id=stmt.card_id,
             card_last_four=stmt.card.last_four if stmt.card else "Unknown",
             bank_code=stmt.card.bank_code if stmt.card else None,
+            bank_logo_url=get_bank_logo_url(stmt.card.bank_code) if stmt.card else None,
             statement_month=stmt.statement_month,
             closing_balance=stmt.closing_balance,
             reward_points=stmt.reward_points,
@@ -555,6 +557,7 @@ async def get_statement_detail(
         card_id=statement.card_id,
         card_last_four=statement.card.last_four if statement.card else "Unknown",
         bank_code=statement.card.bank_code if statement.card else None,
+        bank_logo_url=get_bank_logo_url(statement.card.bank_code) if statement.card else None,
         statement_month=statement.statement_month,
         closing_balance=statement.closing_balance,
         reward_points=statement.reward_points,
@@ -581,6 +584,7 @@ async def get_statement_detail(
     - search: Search merchant names (case-insensitive)
     - from_date: Transaction date start
     - to_date: Transaction date end
+    - is_credit: Filter by transaction type (true=credit, false=debit)
 
     ## Sorting
     - Default: by transaction date (newest first)
@@ -608,6 +612,9 @@ async def list_transactions(
     ] = None,
     to_date: Annotated[
         date | None, Query(description="Filter transactions to date")
+    ] = None,
+    is_credit: Annotated[
+        bool | None, Query(description="Filter by transaction type (true=credit, false=debit)")
     ] = None,
     sort: Annotated[
         str, Query(description="Sort field: txn_date, -txn_date, amount, -amount")
@@ -680,6 +687,8 @@ async def list_transactions(
         query = query.where(Transaction.txn_date >= from_date)
     if to_date:
         query = query.where(Transaction.txn_date <= to_date)
+    if is_credit is not None:
+        query = query.where(Transaction.is_credit.is_(is_credit))
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())

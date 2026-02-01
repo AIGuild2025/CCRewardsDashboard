@@ -71,6 +71,214 @@ class TestHDFCParser:
         assert hasattr(parser, "_find_rewards")
         assert hasattr(parser, "parse")
 
+    def test_find_card_number_card_no_formats(self):
+        """HDFC statements often use 'Card No:' with masked digits/spaces."""
+        parser = HDFCParser()
+
+        assert (
+            parser._find_card_number([], "Card No: 4893XXXXXXXXXX3777\nStatement Date: 13/07/2025")
+            == "3777"
+        )
+        assert (
+            parser._find_card_number([], "Card No: 4893 XXXX XXXX 3777\nStatement Date: 13/07/2025")
+            == "3777"
+        )
+        assert (
+            parser._find_card_number([], "Card No: XXXX XXXX XXXX 3777\nStatement Date: 13/07/2025")
+            == "3777"
+        )
+
+    def test_find_statement_period_from_statement_date(self):
+        """HDFC statements may omit a period range; derive month from statement date."""
+        parser = HDFCParser()
+        result = parser._find_statement_period([], "Statement Date: 13/07/2025\nCard No: XXXX XXXX XXXX 3777")
+        assert result == date(2025, 7, 1)
+
+    def test_find_rewards_reward_points_summary_table(self):
+        """HDFC Reward Points Summary should map opening/earned/closing correctly."""
+        parser = HDFCParser()
+
+        text = """
+        Statement for HDFC Bank Credit Card
+        Statement Date: 13/07/2025
+        Card No: 4893XXXXXXXXXX3777
+        Amount Due: 5,154.00
+
+        Reward Points Summary
+        Opening Balance Feature + Bonus Reward Points Earned Disbursed Adjusted/Lapsed Closing Balance
+        Points expiring in next 30 days Points expiring in next 60 days
+        2,652 66 0 0 2,718 0 0
+        """
+
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value=text)
+        parsed = parser.parse([mock_element])
+
+        assert parsed.reward_points == 2718
+        assert parsed.reward_points_earned == 66
+        assert parsed.reward_points_previous == 2652
+        assert parsed.reward_points_redeemed == 0
+
+    def test_parse_newer_hdfc_template_billing_period_and_domestic_rows(self):
+        """Newer HDFC template should still parse card/period/dues/rewards/transactions."""
+        parser = HDFCParser()
+
+        text = """
+        TOTAL AMOUNT DUE
+        C687.00
+        MINIMUM DUE
+        C200.00
+        DUE DATE
+        03 Oct, 2025
+        Reward Points
+        2,478
+        REDEEM REWARDS
+        Opening Balance Feature + Bonus Reward
+        Points Earned
+        Disbursed Adjusted/Lapsed
+        2,452 26 0 0
+
+        Domestic Transactions
+        DATE & TIME TRANSACTION DESCRIPTION REWARDS AMOUNT PI
+        PALANIMOHAN D
+        25/08/2025| 15:45 ZOMATOGURGAON + 4  C 329.95 l
+        25/08/2025| 11:25 ZOMATONEW DELHI + 4  C 356.20 l
+        01/09/2025| 22:07 CREDIT CARD PAYMENTNet Banking (Ref#
+        00000000000901015039786) +  C 1,431.00 l
+
+        Credit Card No.
+        Alternate Account Number
+        Statement Date
+        Billing Period
+        489377XXXXXX3777
+        0001014550009323771
+        13 Sep, 2025
+        14 Aug, 2025 - 13 Sep, 2025
+        """
+
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value=text)
+        parsed = parser.parse([mock_element])
+
+        assert parsed.card_last_four == "3777"
+        assert parsed.statement_month == date(2025, 9, 1)
+        assert parsed.closing_balance_cents == 68700
+
+        assert parsed.reward_points == 2478
+        assert parsed.reward_points_earned == 26
+        assert parsed.reward_points_previous == 2452
+        assert parsed.reward_points_redeemed == 0
+
+        assert len(parsed.transactions) == 3
+        assert parsed.transactions[0].description == "ZOMATOGURGAON"
+        assert parsed.transactions[0].amount_cents == 32995
+        assert parsed.transactions[2].transaction_type == "credit"
+        assert parsed.transactions[2].amount_cents == 143100
+
+    def test_find_account_summary_extracts_total_dues(self):
+        """Account Summary should be parsed and used as outstanding (Total Dues)."""
+        parser = HDFCParser()
+
+        text = """
+        Statement for HDFC Bank Credit Card
+        Statement Date: 13/07/2025
+        Card No: 4893XXXXXXXXXX3777
+
+        Account Summary
+        Opening Balance Payment/Credits Purchase/Debits Finance Charges Total Dues
+        0.00 0.00 5,153.98 0.00 5,154.00
+
+        13/07/2025 AMAZON 1,000.00
+        """
+
+        # Drive through parser.parse so we validate the end-to-end mapping:
+        # - account_summary exists
+        # - closing_balance uses Total Dues
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value=text)
+        parsed = parser.parse([mock_element])
+
+        assert parsed.account_summary is not None
+        assert parsed.account_summary.previous_balance_cents == 0
+        assert parsed.account_summary.credits_cents == 0
+        assert parsed.account_summary.debits_cents == 515398
+        assert parsed.account_summary.fees_cents == 0
+        assert parsed.account_summary.total_outstanding_cents == 515400
+
+        assert parsed.closing_balance_cents == 515400
+
+    def test_extract_transactions_domestic_and_international_sections(self):
+        """HDFC transaction sections should be parsed even when columns are line-split."""
+        parser = HDFCParser()
+
+        text = """
+        Statement for HDFC Bank Credit Card
+        Statement Date: 13/07/2025
+        Card No: 4893XXXXXXXXXX3777
+        Amount Due: 5,154.00
+
+        Domestic Transactions
+        Date  Transaction Description Feature Reward Points Amount (in Rs.)
+        27/06/2025 23:56:47
+        PALANIMOHAN D
+        ADITYA BIRLA FASHION AND Kurla
+        34
+        2,630.00
+        11/07/2025 10:44:53
+        2CO.COM|BITDEFENDER AMSTERDAM
+        32
+        2,498.99
+        13/07/2025
+        1% on all DCC Transaction (Ref# ST251950084000011777132)
+        0
+        24.99
+
+        International Transactions
+        Date  Transaction Description Feature Reward Points Amount (in Rs.)
+        05/07/2025 09:00:00
+        SOME INTERNATIONAL MERCHANT
+        12
+        100.00
+
+        Reward Points Summary
+        """
+
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value=text)
+        parsed = parser.parse([mock_element])
+
+        assert len(parsed.transactions) == 4
+        assert parsed.transactions[0].amount_cents == 263000
+        assert parsed.transactions[1].amount_cents == 249899
+        assert parsed.transactions[2].amount_cents == 2499
+        assert parsed.transactions[3].amount_cents == 10000
+
+    def test_extract_transactions_regex_fallback_when_date_not_line_start(self):
+        """pypdf can reorder columns so dates appear mid-line; fallback should still parse rows."""
+        parser = HDFCParser()
+
+        text = """
+        Statement for HDFC Bank Credit Card
+        Statement Date: 13/07/2025
+        Card No: 4893XXXXXXXXXX3777
+        Amount Due: 5,154.00
+
+        Domestic Transactions
+        Date  Transaction Description Feature Reward Points Amount (in Rs.)
+        PALANIMOHAN D 27/06/2025 23:56:47 ADITYA BIRLA FASHION AND Kurla 34 2,630.00
+        SOME TEXT 11/07/2025 10:44:53 2CO.COM|BITDEFENDER AMSTERDAM 32 2,498.99
+
+        Reward Points Summary
+        """
+
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value=text)
+        parsed = parser.parse([mock_element])
+
+        assert len(parsed.transactions) == 2
+        assert parsed.transactions[0].amount_cents == 263000
+        assert parsed.transactions[1].amount_cents == 249899
+
 
 class TestAmexParser:
     """Test suite for American Express parser refinement."""
@@ -153,14 +361,66 @@ class TestAmexParser:
         result = parser._find_card_number(elements, full_text)
         assert result == "4321"
 
+    def test_find_card_number_masked_dash_format(self):
+        """Test extracting from masked dash format (XXXX-XXXXXX-73008)."""
+        parser = AmexParser()
+
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value="Card Number XXXX-XXXXXX-73008")
+        elements = [mock_element]
+        full_text = "Card Number XXXX-XXXXXX-73008"
+
+        result = parser._find_card_number(elements, full_text)
+        assert result == "3008"
+
+    def test_parse_date_dd_mm_yyyy(self):
+        """Test parsing DD/MM/YYYY format common in AmEx India headers."""
+        parser = AmexParser()
+        result = parser._parse_date("23/10/2025")
+        assert result == date(2025, 10, 23)
+
+    def test_extract_transactions_month_name_day_without_year(self):
+        """AmEx India statements often omit year per transaction row."""
+        parser = AmexParser()
+
+        text = """
+        Opening Balance RsNew Credits RsNew Debits RsClosing Balance RsMinimum Payment Rs
+        6,031.83-7,260.40+14,022.15=12,793.58640.00
+        Statement Period From  September 24  to October 23, 2025
+        Card Number XXXX-XXXXXX-73008 CR
+        September 25 cca*GRT Jewellers India Chennai 6,000.00
+        October 9 Billdesk*AMAZON MUM 0.30
+        CR
+        October 06 PAYMENT RECEIVED. THANK YOU 6,031.83
+        """.strip()
+
+        # Avoid dependency on real PDF extraction by overriding fallback text.
+        setattr(parser, "_pdf_text_override", text)
+
+        # Parse uses full_text built from elements; provide a single element with our text.
+        mock_element = Mock()
+        mock_element.__str__ = Mock(return_value=text)
+
+        stmt = parser.parse([mock_element])
+        assert stmt.bank_code == "amex"
+        assert stmt.card_last_four == "3008"
+        assert stmt.statement_month == date(2025, 10, 1)
+        assert len(stmt.transactions) == 3
+        # Payment received should be treated as credit
+        pay = [t for t in stmt.transactions if "payment received" in t.description.lower()][0]
+        assert pay.transaction_type == "credit"
+
     def test_find_card_number_fallback_to_generic(self):
         """Test fallback to GenericParser for standard 4-digit patterns."""
         parser = AmexParser()
 
         mock_element = Mock()
-        mock_element.__str__ = Mock(return_value="Card ending 6789")
+        mock_element.__str__ = Mock(return_value="Card Number: xxxxxxxxxxxx6789")
         elements = [mock_element]
-        full_text = "Card ending 6789"
+        full_text = "Card Number: xxxxxxxxxxxx6789"
+        assert parser._find_card_number(elements, full_text) == "6789"
+
+    def test_find_card_number_raises_when_missing(self):
         """Test card number extraction raises ValueError when not found."""
         parser = AmexParser()
 

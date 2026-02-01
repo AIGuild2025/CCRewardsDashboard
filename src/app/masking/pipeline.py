@@ -3,7 +3,7 @@
 import hashlib
 import hmac
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
 from presidio_analyzer import RecognizerResult
@@ -32,6 +32,20 @@ class PIIMaskingPipeline:
         r'\d{4}[\sX*]{4,}\d{2,4}',  # Patterns like "4532 XXXX XXXX 0366"
         r'[X*]{4}\s[X*]{4}\s[X*]{4}\s[X*]{2,4}\d{2,4}',  # XXXX XXXX XXXX XX95
     ]
+
+    # Heuristic keywords which, when present near a PERSON span, strongly suggest the
+    # span is part of a merchant/company string rather than an individual's name.
+    #
+    # This is intentionally conservative and can be extended as we see more banks.
+    _MERCHANT_CONTEXT_RE = re.compile(
+        r"\b(?:"
+        r"FASHION|STORE|MART|SUPERMARKET|RESTAURANT|CAFE|HOTEL|AIRLINE(?:S)?|TRAVEL(?:S)?|"
+        r"PHARMACY|HOSPITAL|CLINIC|PETROL|FUEL|GAS|"
+        r"ENTERPRISE(?:S)?|TRADER(?:S)?|INDUSTR(?:Y|IES)|"
+        r"BANK|COMPANY|CO\.?|PVT\.?|LTD\.?|LLP"
+        r")\b",
+        re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -99,16 +113,18 @@ class PIIMaskingPipeline:
             entities=entities_to_mask,
             score_threshold=self.confidence_threshold,
         )
-        
+
+        operators = self.operators
+
         # Apply HMAC tokenization for person names if user_id is provided
         if self.user_id:
-            results = self._apply_hmac_to_names(text, results)
-        
+            results, operators = self._apply_hmac_to_names(text, results)
+
         # Anonymize detected PII
         anonymized = self.anonymizer.anonymize(
             text=text,
             analyzer_results=results,
-            operators=self.operators,
+            operators=operators,
         )
         
         return anonymized.text
@@ -228,7 +244,7 @@ class PIIMaskingPipeline:
         self,
         text: str,
         results: List[RecognizerResult],
-    ) -> List[RecognizerResult]:
+    ) -> Tuple[List[RecognizerResult], Dict[str, OperatorConfig]]:
         """Apply HMAC-based tokenization to person names.
         
         This creates deterministic tokens that are consistent per user
@@ -239,35 +255,52 @@ class PIIMaskingPipeline:
             results: Analysis results from Presidio
             
         Returns:
-            Modified results with HMAC tokens for person names
+            Tuple of (modified_results, operators_override) for anonymization
         """
         if not self.user_id:
-            return results
+            return results, self.operators
         
-        modified_results = []
         user_key = str(self.user_id).encode()
+        operators = dict(self.operators)
+        modified_results: List[RecognizerResult] = []
         
         for result in results:
             if result.entity_type == "PERSON":
-                # Extract the name
+                # Heuristic: Preserve merchant/company strings even if spaCy mislabels
+                # a span as PERSON (common in card statements).
+                if self._has_merchant_context(text, result.start, result.end):
+                    result.entity_type = "ORGANIZATION"
+                    modified_results.append(result)
+                    continue
+
                 name = text[result.start:result.end]
-                
-                # Create HMAC token
                 token = hmac.new(
                     key=user_key,
                     msg=name.encode(),
                     digestmod=hashlib.sha256,
-                ).hexdigest()[:8]  # Use first 8 chars
-                
-                # Update operator to use the token
-                self.operators["PERSON"] = OperatorConfig(
+                ).hexdigest()[:8]
+
+                # Presidio anonymizer operates per entity type, not per span.
+                # To support per-name deterministic tokens, we assign a unique
+                # entity type per token and inject a corresponding operator.
+                entity_type = f"PERSON_HMAC_{token}"
+                result.entity_type = entity_type
+                operators[entity_type] = OperatorConfig(
                     "replace",
-                    {"new_value": f"[NAME_{token}]"}
+                    {"new_value": f"[NAME_{token}]"},
                 )
-            
+
             modified_results.append(result)
         
-        return modified_results
+        return modified_results, operators
+
+    @classmethod
+    def _has_merchant_context(cls, text: str, start: int, end: int) -> bool:
+        # Look around the detected PERSON span for merchant keywords.
+        window = 40
+        left = max(0, start - window)
+        right = min(len(text), end + window)
+        return bool(cls._MERCHANT_CONTEXT_RE.search(text[left:right]))
     
     def get_detected_entities(
         self,

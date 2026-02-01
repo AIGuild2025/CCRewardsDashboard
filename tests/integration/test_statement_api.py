@@ -500,7 +500,8 @@ class TestStatementTransactions:
                     merchant=merchants[i % len(merchants)],
                     amount=(i + 1) * 100,
                     category=categories[i % len(categories)],
-                    is_credit=False,
+                    # Include a few credits so type-filtering can be tested.
+                    is_credit=(i % 10 == 0),
                     reward_points=(i + 1) * 10,
                 )
             )
@@ -634,6 +635,31 @@ class TestStatementTransactions:
         for txn in data["transactions"]:
             txn_date = date.fromisoformat(txn["txn_date"])
             assert date(2024, 1, 10) <= txn_date <= date(2024, 1, 15)
+
+    @pytest.mark.asyncio
+    async def test_list_transactions_filter_by_type(
+        self, client: AsyncClient, auth_headers: dict, setup_statement_with_many_transactions: dict
+    ):
+        """Test filtering transactions by debit/credit."""
+        statement = setup_statement_with_many_transactions["statement"]
+
+        resp_credit = await client.get(
+            f"/api/v1/statements/{statement.id}/transactions?is_credit=true",
+            headers=auth_headers,
+        )
+        assert resp_credit.status_code == 200
+        data_credit = resp_credit.json()
+        assert data_credit["pagination"]["total"] > 0
+        assert all(t["is_credit"] is True for t in data_credit["transactions"])
+
+        resp_debit = await client.get(
+            f"/api/v1/statements/{statement.id}/transactions?is_credit=false",
+            headers=auth_headers,
+        )
+        assert resp_debit.status_code == 200
+        data_debit = resp_debit.json()
+        assert data_debit["pagination"]["total"] > 0
+        assert all(t["is_credit"] is False for t in data_debit["transactions"])
 
 
 class TestStatementDelete:
