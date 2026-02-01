@@ -116,17 +116,17 @@ async def parse_pdf(
                 detail=f"PDF parsing failed: {result.error_message}"
             )
         
-        # Optionally validate categories with second LLM
-        validation_result = None
-        if validate:
-            extractor = TransactionExtractor()
-            validation_result = extractor.validate_categories_with_second_llm(result.statement_data.transactions)
-        
         # Extract transactions (only debits)
         transactions = [
             txn for txn in result.statement_data.transactions 
             if txn.transaction_type == 'debit'
         ]
+        
+        # Optionally validate categories with second LLM (after filtering)
+        validation_result = None
+        if validate:
+            extractor = TransactionExtractor()
+            validation_result = extractor.validate_categories_with_second_llm(transactions)
         
         # Build response
         from decimal import Decimal
