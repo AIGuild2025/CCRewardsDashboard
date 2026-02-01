@@ -465,6 +465,7 @@ Respond with a JSON array ONLY (no other text):
                 )
                 validation_model = model
                 print(f"\n=> Validating with second LLM ({validation_model})...")
+                print(f"=> Total transactions to validate: {len(transactions)}")
                 break
             except Exception as e:
                 continue
@@ -524,6 +525,11 @@ Respond with a JSON array ONLY (no other text):
                 
                 validations = json.loads(content)
                 
+                # Ensure we only process the same number of validations as transactions in batch
+                if len(validations) != len(batch):
+                    print(f"  [WARN] Validation returned {len(validations)} results for {len(batch)} transactions - truncating")
+                    validations = validations[:len(batch)]
+                
                 # Compare with original categories
                 for txn, validation in zip(batch, validations):
                     if isinstance(validation, dict) and 'category' in validation:
@@ -556,6 +562,8 @@ Respond with a JSON array ONLY (no other text):
         
         total = matches + mismatches
         accuracy = (matches / total * 100) if total > 0 else 0
+        
+        print(f"\n=> Validation complete: {matches} matches, {mismatches} mismatches, {total} total ({accuracy:.2f}% accuracy)")
         
         return {
             'status': 'completed',
