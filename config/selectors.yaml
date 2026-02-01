@@ -37,6 +37,15 @@ selectors:
       earning_rate:
         xpath: "//div[@class='earning-box']"
     version: "2024-01-30"
+  HDFC:
+    pixel_play_credit_card:
+      card_name:
+        xpath: "//span[@class='banner-title']"
+      benefits:
+        xpath: "//ul[@class='showList']"
+      eligibility:
+        xpath: "//div[contains(@class, 'quick-eligibility_List')]"
+    version: "2024-02-01"
 
 # Generic fallback selectors
 fallback:
