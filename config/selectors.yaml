@@ -4,39 +4,100 @@
 # Versioned for easy rollback if bank updates their site.
 
 selectors:
-  Chase:
-    sapphire_preferred:
-      card_name: "h1.chakra__heading"
-      annual_fee: 
-        xpath: "//span[contains(text(), 'Annual Fee')]/following-sibling::*"
-        text_pattern: "\\$(\\d+)"
-      earning_rate:
-        xpath: "//span[contains(text(), 'earn')] | //p[contains(text(), 'Points')]"
-      benefits:
-        xpath: "//div[@data-qa='benefits-list']//li"
-      eligibility:
-        xpath: "//div[@data-qa='eligibility']"
-    version: "2024-01-30"
 
   American Express:
     platinum:
+      card_name: 
+        xpath: "//span[@class='normal']"
+      annual_fee:
+        xpath: "//div[@class='product-feature']//span[text()='Annual fee']/following::span[1]"
+      card_type:
+        xpath: "//div[@class='product-feature']//span[text()='Card Type']/following::span[1]"
+      benefits:
+        xpath: "//div[@name='key-benefits']"
+      rewards:
+        xpath: "//h2[text()='Rewards']/parent::div/parent::div//aexp-list"
+      foot_notes:
+        xpath: "//span[@class='eligibility_text__Footnotes']/div/span"
+      eligibility:
+        xpath: "//section[@class='card-detail__eligibility']/div[@class='card-detail__eligibility__wrapper']/ul"
+    version: "2024-01-30"
+    platinum_reserve:
       card_name: "h1"
       annual_fee:
-        xpath: "//p[contains(text(), 'Annual')] | //span[@class='fee-amount']"
-      earning_rate:
-        xpath: "//div[@class='earning-section']"
+        xpath: "//div[@class='product-feature']//span[text()='Annual fee']/following::span[1]"
+      card_type:
+        xpath: "//div[@class='product-feature']//span[text()='Card Type']/following::a[1]"
       benefits:
-        xpath: "//ul[@class='benefits-list']/li"
+        xpath: "//section[@name='key-benefits']"
+      rewards:
+        xpath: "//div[@class='long-form-benefits-container']"
+      foot_notes:
+        xpath: "//span[@class='eligibility_text__Footnotes']/div/span"
+      eligibility:
+        xpath: "//section[@class='card-detail__eligibility']/div[@class='card-detail__eligibility__wrapper']/ul"
+    version: "2024-01-30"
+    platinum_travel:
+      card_name: "h1"
+      annual_fee:
+        xpath: "//div[@class='product-feature']//span[text()='Annual fee']/following::span[1]"
+      card_type:
+        xpath: "//div[@class='product-feature']//span[text()='Card Type']/following::a[1]"
+      benefits:
+        xpath: "//section[@name='key-benefits']"
+      rewards:
+        xpath: "//div[@class='long-form-benefits-container']"
+      foot_notes:
+        xpath: "//span[@class='eligibility_text__Footnotes']/div/span"
+      eligibility:
+        xpath: "//section[@class='card-detail__eligibility']/div[@class='card-detail__eligibility__wrapper']/ul"
+    version: "2024-01-30"
+    gold:
+      card_name: "h1"
+      annual_fee:
+        xpath: "//div[@class='product-feature']//span[text()='Card fee']/following::span[1]"
+      card_type:
+        xpath: "//div[@class='product-feature']//span[text()='Card Type']/following::a[1]"
+      benefits:
+        xpath: "//section[@name='key-benefits']"
+      rewards:
+        xpath: "//div[@class='long-form-benefits-container']"
+      foot_notes:
+        xpath: "//span[@class='eligibility_text__Footnotes']/div/span"
+      eligibility:
+        xpath: "//section[@class='card-detail__eligibility']/div[@class='card-detail__eligibility__wrapper']/ul"
+    version: "2024-01-30"
+    membership_rewards:
+      card_name: "h1"
+      annual_fee:
+        xpath: "//div[@class='product-feature']//span[text()='Annual fee']/following::span[1]"
+      card_type:
+        xpath: "//div[@class='product-feature']//span[text()='Card Type']/following::a[1]"
+      benefits:
+        xpath: "//section[@name='key-benefits']"
+      rewards:
+        xpath: "//div[@class='long-form-benefits-container']"
+      foot_notes:
+        xpath: "//span[@class='eligibility_text__Footnotes']/div/span"
+      eligibility:
+        xpath: "//section[@class='card-detail__eligibility']/div[@class='card-detail__eligibility__wrapper']/ul"
+    version: "2024-01-30"
+    smart_earn:
+      card_name: "h1"
+      annual_fee:
+        xpath: "//div[@class='product-feature']//span[text()='Annual fee']/following::span[1]"
+      card_type:
+        xpath: "//div[@class='product-feature']//span[text()='Card Type']/following::a[1]"
+      benefits:
+        xpath: "//section[@name='key-benefits']"
+      rewards:
+        xpath: "//div[@class='long-form-benefits-container']"
+      foot_notes:
+        xpath: "//span[@class='eligibility_text__Footnotes']/div/span"
+      eligibility:
+        xpath: "//section[@class='card-detail__eligibility']/div[@class='card-detail__eligibility__wrapper']/ul"
     version: "2024-01-30"
 
-  Bank of America:
-    premium_rewards:
-      card_name: "h1.page-title"
-      annual_fee:
-        xpath: "//span[contains(text(), 'Annual Fee')]/parent::*"
-      earning_rate:
-        xpath: "//div[@class='earning-box']"
-    version: "2024-01-30"
   HDFC:
     pixel_play_credit_card:
       card_name:
